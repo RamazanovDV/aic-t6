@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from app.llm.base import Message
 from app.storage import storage
@@ -12,17 +12,35 @@ class Session:
     messages: list[Message] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+    provider: str = ""
+    model: str = ""
+    total_tokens: int = 0
+    user_settings: dict[str, Any] = field(default_factory=dict)
 
-    def add_user_message(self, content: str) -> None:
-        self.messages.append(Message(role="user", content=content))
+    def add_user_message(self, content: str, usage: dict[str, int] | None = None) -> None:
+        msg = Message(role="user", content=content, usage=usage or {})
+        self.messages.append(msg)
         self.updated_at = datetime.now()
 
-    def add_assistant_message(self, content: str) -> None:
-        self.messages.append(Message(role="assistant", content=content))
+    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None) -> None:
+        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug)
+        self.messages.append(msg)
+        if usage:
+            self.total_tokens += usage.get("total_tokens", 0)
         self.updated_at = datetime.now()
+
+    def set_provider_model(self, provider: str, model: str) -> None:
+        self.provider = provider
+        self.model = model
 
     def to_markdown(self) -> str:
         lines = [f"# Session: {self.session_id}", f"Created: {self.created_at.isoformat()}", ""]
+        
+        if self.provider or self.model:
+            lines.append(f"**Provider:** {self.provider or 'default'}")
+            lines.append(f"**Model:** {self.model or 'default'}")
+            lines.append(f"**Total tokens:** {self.total_tokens}")
+            lines.append("")
 
         for msg in self.messages:
             role_emoji = "👤" if msg.role == "user" else "🤖"
@@ -35,10 +53,16 @@ class Session:
 
     def clear(self) -> None:
         self.messages = []
+        self.total_tokens = 0
+        self.updated_at = datetime.now()
+
+    def clear_debug(self) -> None:
+        for msg in self.messages:
+            msg.debug = None
         self.updated_at = datetime.now()
 
     def save(self) -> None:
-        storage.save_session(self.session_id, self.messages, self.created_at, self.updated_at)
+        storage.save_session(self)
 
 
 class SessionManager:
@@ -52,12 +76,24 @@ class SessionManager:
             session_id = session_info["session_id"]
             data = storage.load_session(session_id)
             if data:
-                messages = [Message(role=m["role"], content=m["content"]) for m in data.get("messages", [])]
+                messages = [
+                    Message(
+                        role=m["role"],
+                        content=m["content"],
+                        usage=m.get("usage", {}),
+                        debug=m.get("debug"),
+                    )
+                    for m in data.get("messages", [])
+                ]
                 session = Session(
                     session_id=session_id,
                     messages=messages,
                     created_at=datetime.fromisoformat(data.get("created_at", datetime.now().isoformat())),
                     updated_at=datetime.fromisoformat(data.get("updated_at", datetime.now().isoformat())),
+                    provider=data.get("provider", ""),
+                    model=data.get("model", ""),
+                    total_tokens=data.get("total_tokens", 0),
+                    user_settings=data.get("user_settings", {}),
                 )
                 self._sessions[session_id] = session
 
@@ -105,12 +141,24 @@ class SessionManager:
         session_id = storage.import_session(session_data)
         data = storage.load_session(session_id)
         if data:
-            messages = [Message(role=m["role"], content=m["content"]) for m in data.get("messages", [])]
+            messages = [
+                Message(
+                    role=m["role"],
+                    content=m["content"],
+                    usage=m.get("usage", {}),
+                    debug=m.get("debug"),
+                )
+                for m in data.get("messages", [])
+            ]
             session = Session(
                 session_id=session_id,
                 messages=messages,
                 created_at=datetime.fromisoformat(data.get("created_at", datetime.now().isoformat())),
                 updated_at=datetime.fromisoformat(data.get("updated_at", datetime.now().isoformat())),
+                provider=data.get("provider", ""),
+                model=data.get("model", ""),
+                total_tokens=data.get("total_tokens", 0),
+                user_settings=data.get("user_settings", {}),
             )
             self._sessions[session_id] = session
         return session_id

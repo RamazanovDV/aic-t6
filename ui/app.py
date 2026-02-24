@@ -79,6 +79,11 @@ def settings():
     return render_template("settings.html")
 
 
+@ui_bp.route("/admin")
+def admin():
+    return render_template("admin.html")
+
+
 @ui_bp.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json()
@@ -87,6 +92,8 @@ def chat():
 
     user_message = data["message"]
     provider_name = data.get("provider")
+    model = data.get("model")
+    debug_mode = data.get("debug", False)
     session_id = get_session_id()
 
     url = f"{ui_config.backend_url}/chat"
@@ -96,9 +103,11 @@ def chat():
         "Content-Type": "application/json",
     }
 
-    payload = {"message": user_message}
+    payload = {"message": user_message, "debug": debug_mode}
     if provider_name:
         payload["provider"] = provider_name
+    if model:
+        payload["model"] = model
 
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=60)
@@ -260,6 +269,287 @@ def import_session():
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/config", methods=["GET"])
+def get_admin_config():
+    url = f"{ui_config.backend_url}/admin/config"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/config", methods=["POST"])
+def save_admin_config():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    url = f"{ui_config.backend_url}/admin/config"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/config/validate", methods=["POST"])
+def validate_provider():
+    data = request.get_json()
+    if not data or "provider" not in data:
+        return jsonify({"error": "Missing provider"}), 400
+
+    url = f"{ui_config.backend_url}/admin/config/validate"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return jsonify(response.json())
+        return jsonify({"error": response.json().get("error", "Validation failed")}), 400
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/providers/<provider_name>/models", methods=["GET"])
+def get_provider_models(provider_name: str):
+    url = f"{ui_config.backend_url}/admin/providers/{provider_name}/models"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            return jsonify({"error": f"Backend returned {response.status_code}: {response.text}"}), response.status_code
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/context", methods=["GET"])
+def list_context_files():
+    url = f"{ui_config.backend_url}/admin/context"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/context", methods=["POST"])
+def create_context_file():
+    data = request.get_json()
+    if not data or "filename" not in data:
+        return jsonify({"error": "Missing filename"}), 400
+
+    url = f"{ui_config.backend_url}/admin/context"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        if response.status_code == 400:
+            return jsonify({"error": response.json().get("error", "File already exists")}), 400
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/context/enabled", methods=["GET"])
+def get_enabled_context_files():
+    url = f"{ui_config.backend_url}/admin/context/enabled"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/context/enabled", methods=["POST"])
+def set_enabled_context_files():
+    data = request.get_json()
+    if not data or "enabled_files" not in data:
+        return jsonify({"error": "Missing enabled_files"}), 400
+
+    url = f"{ui_config.backend_url}/admin/context/enabled"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/context/<filename>", methods=["GET"])
+def get_context_file(filename: str):
+    url = f"{ui_config.backend_url}/admin/context/{filename}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 404:
+            return jsonify({"error": "File not found"}), 404
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/context/<filename>", methods=["POST"])
+def save_context_file(filename: str):
+    data = request.get_json()
+    if not data or "content" not in data:
+        return jsonify({"error": "Missing content"}), 400
+
+    url = f"{ui_config.backend_url}/admin/context/{filename}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/context/<filename>", methods=["DELETE"])
+def delete_context_file(filename: str):
+    url = f"{ui_config.backend_url}/admin/context/{filename}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.delete(url, headers=headers, timeout=10)
+        if response.status_code == 404:
+            return jsonify({"error": response.json().get("error", "File not found")}), 404
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/context/<filename>/rename", methods=["POST"])
+def rename_context_file(filename: str):
+    data = request.get_json()
+    if not data or "new_name" not in data:
+        return jsonify({"error": "Missing new_name"}), 400
+
+    url = f"{ui_config.backend_url}/admin/context/{filename}/rename"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        if response.status_code == 400:
+            return jsonify({"error": response.json().get("error", "File already exists")}), 400
+        if response.status_code == 404:
+            return jsonify({"error": response.json().get("error", "File not found")}), 404
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/user/settings", methods=["GET"])
+def get_user_settings():
+    session_id = get_session_id()
+    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 404:
+            return jsonify({"provider": "", "model": ""})
+        response.raise_for_status()
+        data = response.json()
+        return jsonify({
+            "provider": data.get("provider", ""),
+            "model": data.get("model", ""),
+        })
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/user/settings", methods=["POST"])
+def save_user_settings():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    session_id = get_session_id()
+    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        session_data = {}
+        if response.status_code == 200:
+            session_data = response.json()
+        
+        if not session_data.get("session_id"):
+            session_data["session_id"] = session_id
+        
+        session_data["user_settings"] = data
+        
+        response = requests.post(
+            f"{ui_config.backend_url}/sessions/import",
+            headers={"X-API-Key": ui_config.backend_api_key, "Content-Type": "application/json"},
+            json=session_data,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return jsonify({"status": "saved"})
+    except requests.RequestException as e:
+        print(f"[ERROR] save_user_settings: {e}")
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 

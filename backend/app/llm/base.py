@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -7,12 +7,17 @@ from typing import Any
 class Message:
     role: str
     content: str
+    usage: dict[str, int] = field(default_factory=dict)
+    debug: dict | None = None
 
 
 @dataclass
 class LLMResponse:
     content: str
     model: str
+    usage: dict[str, int] = field(default_factory=dict)
+    debug_request: dict | None = None
+    debug_response: dict | None = None
 
 
 class BaseProvider(ABC):
@@ -22,7 +27,7 @@ class BaseProvider(ABC):
         self.model = model
 
     @abstractmethod
-    def chat(self, messages: list[Message], system_prompt: str | None = None) -> LLMResponse:
+    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> LLMResponse:
         pass
 
     @abstractmethod

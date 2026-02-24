@@ -1,5 +1,6 @@
 import json
 
+import requests
 from flask import Blueprint, jsonify, request, Response
 
 from app.config import config
@@ -8,6 +9,7 @@ from app.llm import ProviderFactory
 from app.session import session_manager
 
 api_bp = Blueprint("api", __name__)
+admin_bp = Blueprint("admin", __name__)
 
 
 def require_auth(f):
@@ -41,11 +43,20 @@ def chat():
         return jsonify({"error": "Missing 'message' field"}), 400
 
     user_message = data["message"]
-    provider_name = data.get("provider", config.default_provider)
-
+    provider_name = data.get("provider")
+    model = data.get("model")
+    debug_mode = data.get("debug", False)
+    
+    if not provider_name:
+        provider_name = config.default_provider
+    
     provider_config = config.get_provider_config(provider_name)
     if not provider_config:
         return jsonify({"error": f"Unknown provider: {provider_name}"}), 400
+    
+    if model:
+        provider_config = provider_config.copy()
+        provider_config["model"] = model
 
     try:
         provider = ProviderFactory.create(provider_name, provider_config)
@@ -55,22 +66,41 @@ def chat():
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
     session.add_user_message(user_message)
+    
+    if provider_name and model:
+        session.set_provider_model(provider_name, model)
+    elif provider_name and not session.provider:
+        session.set_provider_model(provider_name, provider_config.get("model", ""))
 
     system_prompt = get_system_prompt()
 
     try:
-        response = provider.chat(session.messages, system_prompt)
+        response = provider.chat(session.messages, system_prompt, debug=debug_mode)
     except Exception as e:
         return jsonify({"error": f"LLM error: {str(e)}"}), 500
 
-    session.add_assistant_message(response.content)
+    debug_info = None
+    if debug_mode:
+        debug_info = {
+            "request": response.debug_request,
+            "response": response.debug_response,
+        }
+
+    session.add_assistant_message(response.content, response.usage, debug=debug_info)
     session_manager.save_session(session_id)
 
-    return jsonify({
+    result = {
         "message": response.content,
         "session_id": session_id,
         "model": response.model,
-    })
+        "usage": response.usage,
+        "total_tokens": session.total_tokens,
+    }
+    
+    if debug_info:
+        result["debug"] = debug_info
+    
+    return jsonify(result)
 
 
 @api_bp.route("/chat/reset", methods=["POST"])
@@ -135,6 +165,19 @@ def rename_session(session_id: str):
     return jsonify({"status": "renamed", "old_id": session_id, "new_id": new_name})
 
 
+@api_bp.route("/sessions/<session_id>/clear-debug", methods=["POST"])
+@require_auth
+def clear_session_debug(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+    
+    session.clear_debug()
+    session_manager.save_session(session_id)
+    
+    return jsonify({"status": "cleared", "session_id": session_id})
+
+
 @api_bp.route("/sessions/export", methods=["POST"])
 @require_auth
 def export_sessions():
@@ -158,3 +201,188 @@ def import_session():
         return jsonify({"status": "imported", "session_id": session_id})
     except Exception as e:
         return jsonify({"error": f"Import failed: {str(e)}"}), 500
+
+
+@admin_bp.route("/config", methods=["GET"])
+@require_auth
+def get_config():
+    return jsonify({
+        "api_key": config.api_key,
+        "default_provider": config.default_provider,
+        "providers": config.providers,
+        "default_models": config.llm.get("default_models", {}),
+    })
+
+
+@admin_bp.route("/config", methods=["POST"])
+@require_auth
+def save_config():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    try:
+        if "api_key" in data:
+            config._config["auth"]["api_key"] = data["api_key"]
+        if "default_provider" in data:
+            config._config["llm"]["default_provider"] = data["default_provider"]
+        if "providers" in data:
+            config._config["llm"]["providers"] = data["providers"]
+        if "default_models" in data:
+            config._config["llm"]["default_models"] = data["default_models"]
+        
+        config.save()
+        return jsonify({"status": "saved"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route("/config/validate", methods=["POST"])
+@require_auth
+def validate_provider():
+    data = request.get_json()
+    if not data or "provider" not in data:
+        return jsonify({"error": "Missing provider"}), 400
+
+    provider_name = data["provider"]
+    provider_config = data.get("config", {})
+
+    try:
+        from app.llm.base import Message
+        provider = ProviderFactory.create(provider_name, provider_config)
+        test_messages = [
+            Message(role="user", content="Hi")
+        ]
+        response = provider.chat(test_messages, "Reply with 'OK' only")
+        return jsonify({
+            "status": "valid",
+            "response": response.content[:100],
+            "model": response.model,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@admin_bp.route("/providers/<provider_name>/models", methods=["GET"])
+@require_auth
+def list_models(provider_name: str):
+    provider_config = config.get_provider_config(provider_name)
+    if not provider_config:
+        return jsonify({"error": f"Provider '{provider_name}' not found in config", "available": list(config.providers.keys())}), 400
+
+    try:
+        provider = ProviderFactory.create(provider_name, provider_config)
+        if hasattr(provider, "list_models"):
+            models = provider.list_models()
+            return jsonify({"models": models})
+        default_model = provider_config.get("model", "")
+        return jsonify({"models": [default_model] if default_model else []})
+    except ValueError as e:
+        return jsonify({"error": f"ValueError: {str(e)}"}), 400
+    except Exception as e:
+        return jsonify({"error": f"Error: {str(e)}", "type": type(e).__name__}), 500
+
+
+@admin_bp.route("/context", methods=["GET"])
+@require_auth
+def list_context_files():
+    files = config.get_context_files()
+    enabled = config.get_enabled_context_files()
+    return jsonify({"files": files, "enabled_files": enabled})
+
+
+@admin_bp.route("/context", methods=["POST"])
+@require_auth
+def create_context_file():
+    data = request.get_json()
+    if not data or "filename" not in data:
+        return jsonify({"error": "Missing filename"}), 400
+
+    filename = data["filename"].strip()
+    content = data.get("content", "")
+
+    try:
+        config.create_context_file(filename, content)
+        return jsonify({"status": "created", "filename": filename})
+    except FileExistsError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route("/context/enabled", methods=["GET"])
+@require_auth
+def get_enabled_context_files():
+    enabled = config.get_enabled_context_files()
+    return jsonify({"enabled_files": enabled})
+
+
+@admin_bp.route("/context/enabled", methods=["POST"])
+@require_auth
+def set_enabled_context_files():
+    data = request.get_json()
+    if not data or "enabled_files" not in data:
+        return jsonify({"error": "Missing enabled_files"}), 400
+
+    try:
+        config.set_enabled_context_files(data["enabled_files"])
+        return jsonify({"status": "saved"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route("/context/<filename>", methods=["GET"])
+@require_auth
+def get_context_file(filename: str):
+    content = config.get_context_file(filename)
+    if content is None:
+        return jsonify({"error": "File not found"}), 404
+    return jsonify({"filename": filename, "content": content})
+
+
+@admin_bp.route("/context/<filename>", methods=["POST"])
+@require_auth
+def save_context_file(filename: str):
+    data = request.get_json()
+    if not data or "content" not in data:
+        return jsonify({"error": "Missing content"}), 400
+
+    try:
+        config.save_context_file(filename, data["content"])
+        return jsonify({"status": "saved"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route("/context/<filename>", methods=["DELETE"])
+@require_auth
+def delete_context_file(filename: str):
+    try:
+        config.delete_context_file(filename)
+        return jsonify({"status": "deleted"})
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route("/context/<filename>/rename", methods=["POST"])
+@require_auth
+def rename_context_file(filename: str):
+    data = request.get_json()
+    if not data or "new_name" not in data:
+        return jsonify({"error": "Missing new_name"}), 400
+
+    new_name = data["new_name"].strip()
+    if not new_name:
+        return jsonify({"error": "New name cannot be empty"}), 400
+
+    try:
+        config.rename_context_file(filename, new_name)
+        return jsonify({"status": "renamed", "old_name": filename, "new_name": new_name})
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except FileExistsError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

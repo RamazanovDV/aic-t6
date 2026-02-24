@@ -36,22 +36,34 @@ class FileStorage:
         safe_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
         return self.sessions_dir / f"{safe_id}.json"
 
-    def save_session(self, session_id: str, messages: list[Message], created_at: datetime, updated_at: datetime) -> None:
-        session_file = self._session_file(session_id)
+    def save_session(self, session) -> None:
+        session_file = self._session_file(session.session_id)
         
         data = {
-            "session_id": session_id,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "created_at": created_at.isoformat(),
-            "updated_at": updated_at.isoformat(),
+            "session_id": session.session_id,
+            "messages": [
+                {
+                    "role": m.role,
+                    "content": m.content,
+                    "usage": m.usage,
+                    "debug": m.debug,
+                }
+                for m in session.messages
+            ],
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "provider": session.provider,
+            "model": session.model,
+            "total_tokens": session.total_tokens,
+            "user_settings": session.user_settings,
         }
 
         with open(session_file, "w") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
         index = self._get_index()
-        if session_id not in index["sessions"]:
-            index["sessions"].append(session_id)
+        if session.session_id not in index["sessions"]:
+            index["sessions"].append(session.session_id)
         self._save_index(index)
 
     def load_session(self, session_id: str) -> dict | None:
@@ -136,11 +148,18 @@ class FileStorage:
 
     def import_session(self, session_data: dict) -> str:
         session_id = session_data.get("session_id", "imported")
-        messages = [Message(role=m["role"], content=m["content"]) for m in session_data.get("messages", [])]
-        created_at = datetime.fromisoformat(session_data.get("created_at", datetime.now().isoformat()))
-        updated_at = datetime.fromisoformat(session_data.get("updated_at", datetime.now().isoformat()))
         
-        self.save_session(session_id, messages, created_at, updated_at)
+        session_file = self._session_file(session_id)
+        session_data["session_id"] = session_id
+        
+        with open(session_file, "w") as f:
+            json.dump(session_data, f, indent=2, ensure_ascii=False)
+        
+        index = self._get_index()
+        if session_id not in index["sessions"]:
+            index["sessions"].append(session_id)
+        self._save_index(index)
+        
         return session_id
 
 

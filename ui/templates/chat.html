@@ -5,15 +5,23 @@
     <div class="chat-header">
         <h2>Чат с AI</h2>
         <div class="chat-controls">
-            <select id="provider-select" class="provider-select">
+            <select id="provider-select" class="provider-select" onchange="onProviderChange()">
                 <option value="">По умолчанию</option>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="ollama">Ollama</option>
-                <option value="itphx">ITPHX</option>
             </select>
+            <select id="model-select" class="model-select" disabled>
+                <option value="">Выберите модель</option>
+            </select>
+            <button class="btn btn-icon" onclick="loadModels()" title="Обновить модели">↻</button>
+            <label class="debug-toggle">
+                <input type="checkbox" id="debug-toggle" onchange="toggleDebug()">
+                <span>Debug</span>
+            </label>
             <button class="btn btn-secondary" onclick="resetChat()">Сбросить чат</button>
         </div>
+    </div>
+
+    <div class="chat-stats" id="chat-stats" style="display: none;">
+        <span id="tokens-info"></span>
     </div>
 
     <div class="chat-messages" id="chat-messages">
@@ -38,14 +46,177 @@
     </form>
 </div>
 
+<div id="debug-modal" class="modal" style="display: none;">
+    <div class="modal-content debug-modal-content">
+        <h3>Debug Info</h3>
+        <div class="debug-tabs">
+            <button class="debug-tab active" data-tab="request" onclick="switchDebugTab('request')">Request</button>
+            <button class="debug-tab" data-tab="response" onclick="switchDebugTab('response')">Response</button>
+        </div>
+        <div class="debug-content">
+            <pre id="debug-json"></pre>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeDebugModal()">Закрыть</button>
+            <button class="btn btn-secondary" onclick="clearDebugData()">Очистить debug</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const chatMessages = document.getElementById('chat-messages');
     const chatForm = document.getElementById('chat-form');
     const messageInput = document.getElementById('message-input');
     const providerSelect = document.getElementById('provider-select');
+    const modelSelect = document.getElementById('model-select');
+    let debugMode = localStorage.getItem('t6_debug') === 'true';
+    let currentDebugData = null;
+
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('debug-toggle').checked = debugMode;
+    });
+
+    function toggleDebug() {
+        debugMode = document.getElementById('debug-toggle').checked;
+        localStorage.setItem('t6_debug', debugMode ? 'true' : 'false');
+    }
+
+    function showDebugModal(debugData) {
+        currentDebugData = debugData;
+        document.getElementById('debug-json').textContent = JSON.stringify(debugData.request, null, 2);
+        document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector('.debug-tab[data-tab="request"]').classList.add('active');
+        document.getElementById('debug-modal').style.display = 'flex';
+    }
+
+    function switchDebugTab(tab) {
+        document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`.debug-tab[data-tab="${tab}"]`).classList.add('active');
+        
+        if (currentDebugData) {
+            const data = tab === 'request' ? currentDebugData.request : currentDebugData.response;
+            document.getElementById('debug-json').textContent = JSON.stringify(data, null, 2);
+        }
+    }
+
+    function closeDebugModal() {
+        document.getElementById('debug-modal').style.display = 'none';
+    }
+
+    function clearDebugData() {
+        const sessionId = getSessionId();
+        fetch(`/api/sessions/${sessionId}/clear-debug`, { method: 'POST' })
+            .then(() => {
+                document.querySelectorAll('.message-debug-btn').forEach(btn => btn.remove());
+                closeDebugModal();
+                location.reload();
+            })
+            .catch(err => console.error('Failed to clear debug:', err));
+    }
 
     function getSessionId() {
         return localStorage.getItem('t6_session_id') || 'default';
+    }
+
+    async function loadProviders() {
+        try {
+            const response = await fetch('/api/admin/config');
+            if (response.ok) {
+                const data = await response.json();
+                const providers = data.providers || {};
+                
+                providerSelect.innerHTML = '<option value="">По умолчанию</option>';
+                for (const name of Object.keys(providers)) {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    providerSelect.appendChild(option);
+                }
+                
+                if (data.default_provider) {
+                    providerSelect.value = data.default_provider;
+                }
+                
+                await loadModels();
+                await loadUserSettings();
+            }
+        } catch (err) {
+            console.error('Failed to load providers:', err);
+        }
+    }
+
+    async function loadModels() {
+        const provider = providerSelect.value;
+        if (!provider) {
+            modelSelect.innerHTML = '<option value="">Выберите провайдер</option>';
+            modelSelect.disabled = true;
+            return;
+        }
+
+        modelSelect.disabled = true;
+        modelSelect.innerHTML = '<option value="">Загрузка...</option>';
+
+        try {
+            const response = await fetch(`/api/admin/providers/${provider}/models`);
+            if (response.ok) {
+                const data = await response.json();
+                
+                if (data.models && data.models.length > 0) {
+                    modelSelect.innerHTML = '<option value="">По умолчанию</option>';
+                    data.models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model;
+                        option.textContent = model;
+                        modelSelect.appendChild(option);
+                    });
+                    modelSelect.disabled = false;
+                } else {
+                    modelSelect.innerHTML = '<option value="">Нет доступных моделей</option>';
+                }
+            } else {
+                const errorData = await response.json();
+                modelSelect.innerHTML = `<option value="">Ошибка: ${errorData.error || 'Unknown'}</option>`;
+            }
+        } catch (err) {
+            modelSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+        }
+    }
+
+    async function onProviderChange() {
+        await loadModels();
+    }
+
+    async function loadUserSettings() {
+        try {
+            const response = await fetch('/api/user/settings');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.provider) {
+                    providerSelect.value = data.provider;
+                }
+                await loadModels();
+                if (data.model) {
+                    modelSelect.value = data.model;
+                }
+            }
+        } catch (err) {
+            console.error('Failed to load user settings:', err);
+        }
+    }
+
+    async function saveUserSettings() {
+        const provider = providerSelect.value;
+        const model = modelSelect.value;
+        
+        try {
+            await fetch('/api/user/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider, model })
+            });
+        } catch (err) {
+            console.error('Failed to save user settings:', err);
+        }
     }
 
     async function loadMessages() {
@@ -65,14 +236,39 @@
                         </div>
                     </div>
                 `;
+                updateStats(0, 0, 0);
                 return;
             }
             
+            let totalInput = 0;
+            let totalOutput = 0;
+            
             messages.forEach(msg => {
-                addMessage(msg.content, msg.role);
+                addMessage(msg.content, msg.role, msg.debug || null);
+                if (msg.usage) {
+                    totalInput += msg.usage.input_tokens || 0;
+                    totalOutput += msg.usage.output_tokens || 0;
+                }
             });
+            
+            updateStats(totalInput, totalOutput, totalInput + totalOutput);
         } catch (err) {
             console.error('Failed to load messages:', err);
+        }
+    }
+
+    function updateStats(inputTokens, outputTokens, totalTokens) {
+        const statsEl = document.getElementById('chat-stats');
+        const tokensInfo = document.getElementById('tokens-info');
+        if (totalTokens > 0 || inputTokens > 0 || outputTokens > 0) {
+            statsEl.style.display = 'block';
+            let text = '';
+            if (inputTokens > 0) text += `Вход: ${inputTokens} | `;
+            if (outputTokens > 0) text += `Выход: ${outputTokens} | `;
+            text += `Всего: ${totalTokens}`;
+            tokensInfo.textContent = text;
+        } else {
+            statsEl.style.display = 'none';
         }
     }
 
@@ -89,6 +285,7 @@
         addMessage(message, 'user');
 
         const provider = providerSelect.value || null;
+        const model = modelSelect.value || null;
         const sessionId = getSessionId();
         
         try {
@@ -98,7 +295,7 @@
                     'Content-Type': 'application/json',
                     'X-Session-Id': sessionId,
                 },
-                body: JSON.stringify({ message, provider })
+                body: JSON.stringify({ message, provider, model, debug: debugMode })
             });
 
             const data = await response.json();
@@ -106,7 +303,14 @@
             if (data.error) {
                 addMessage('Ошибка: ' + data.error, 'error');
             } else {
-                addMessage(data.message, 'assistant');
+                addMessage(data.message, 'assistant', data.debug || null);
+                if (data.usage) {
+                    const inputTokens = data.usage.input_tokens || 0;
+                    const outputTokens = data.usage.output_tokens || 0;
+                    const totalTokens = data.total_tokens || 0;
+                    updateStats(inputTokens, outputTokens, totalTokens);
+                }
+                saveUserSettings();
             }
         } catch (err) {
             addMessage('Ошибка соединения: ' + err.message, 'error');
@@ -117,15 +321,24 @@
         sendBtn.textContent = 'Отправить';
     });
 
-    function addMessage(content, role) {
+    function addMessage(content, role, debugData = null) {
         const div = document.createElement('div');
         div.className = `message message-${role}`;
         
+        let html = '';
         if (role === 'assistant') {
-            div.innerHTML = `<div class="message-content">${marked.parse(content)}</div>`;
+            html = `<div class="message-content">${marked.parse(content.trim())}</div>`;
         } else {
-            div.innerHTML = `<div class="message-content">${escapeHtml(content)}</div>`;
+            html = `<div class="message-content">${escapeHtml(content)}</div>`;
         }
+        
+        if (role === 'assistant' && debugData) {
+            if (debugData.request || debugData.response) {
+                html += `<button class="message-debug-btn" onclick="showDebugModal(${escapeHtml(JSON.stringify(debugData)).replace(/"/g, '&quot;')})" title="Debug">🔍</button>`;
+            }
+        }
+        
+        div.innerHTML = html;
         
         chatMessages.appendChild(div);
         chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -151,6 +364,7 @@
                     </div>
                 </div>
             `;
+            updateStats(0, 0, 0);
         } catch (err) {
             alert('Ошибка сброса чата: ' + err.message);
         }
@@ -163,7 +377,7 @@
         }
     });
 
-    // Load messages on page load
+    loadProviders();
     loadMessages();
 </script>
 {% endblock %}

@@ -11,12 +11,16 @@ class ContextLoader:
         if not self.context_dir.exists():
             return ""
 
-        context_parts = []
-        md_files = sorted(self.context_dir.glob("*.md"))
+        enabled_files = config.get_enabled_context_files()
+        if not enabled_files:
+            return ""
 
-        for md_file in md_files:
-            content = md_file.read_text(encoding="utf-8")
-            context_parts.append(f"--- File: {md_file.name} ---\n{content}\n")
+        context_parts = []
+        for filename in enabled_files:
+            filepath = self.context_dir / filename
+            if filepath.exists() and filepath.suffix == ".md":
+                content = filepath.read_text(encoding="utf-8")
+                context_parts.append(f"--- File: {filename} ---\n{content}\n")
 
         if not context_parts:
             return ""
