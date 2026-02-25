@@ -1,11 +1,30 @@
 import json
+from typing import Generator
 
 import requests
 
-from app.llm.base import BaseProvider, LLMResponse, Message
+from app.llm.base import BaseProvider, LLMChunk, LLMResponse, Message
 
 
 API_KEY_MASK = "[API_KEY_MASKED]"
+
+
+def estimate_tokens(text: str) -> dict:
+    chars_per_token = 4
+    tokens = max(1, len(text) // chars_per_token)
+    return {
+        "input_tokens": 0,
+        "output_tokens": tokens,
+        "total_tokens": tokens,
+        "estimated": True,
+    }
+
+
+class ContextLengthExceededError(Exception):
+    def __init__(self, message: str = "Context window exceeded", debug_response: dict | None = None):
+        self.message = message
+        self.debug_response = debug_response
+        super().__init__(self.message)
 
 
 class GenericOpenAIProvider(BaseProvider):
@@ -39,8 +58,21 @@ class GenericOpenAIProvider(BaseProvider):
                 "body": payload,
             }
 
-        response = requests.post(self.url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            if response.status_code in (400, 422):
+                error_data = response.json() if response.content else {}
+                error_message = ""
+                if isinstance(error_data, dict):
+                    error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
+                    raise ContextLengthExceededError(
+                        error_message or "Context window exceeded",
+                        debug_response=error_data if debug else None
+                    )
+            raise
 
         data = response.json()
         content = data["choices"][0]["message"]["content"]
@@ -71,10 +103,11 @@ class GenericOpenAIProvider(BaseProvider):
                 base_url = base_url.split("/chat/completions")[0]
             elif "/messages" in base_url:
                 base_url = base_url.split("/messages")[0]
-            elif "/v1" in base_url:
-                base_url = base_url.split("/v1")[0]
+            elif base_url.endswith("/v1"):
+                base_url = base_url[:-3]
             
-            models_url = f"{base_url}/v1/models"
+            base_url = base_url.rstrip("/")
+            models_url = f"{base_url}/models"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -90,6 +123,73 @@ class GenericOpenAIProvider(BaseProvider):
 
     def get_provider_name(self) -> str:
         return "generic"
+
+    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> Generator[LLMChunk, None, None]:
+        from app.llm.base import LLMChunk
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        formatted_messages = []
+        if system_prompt:
+            formatted_messages.append({"role": "system", "content": system_prompt})
+
+        for msg in messages:
+            formatted_messages.append({"role": msg.role, "content": msg.content})
+
+        payload = {
+            "model": self.model,
+            "messages": formatted_messages,
+            "temperature": 0.7,
+            "stream": True,
+        }
+
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout, stream=True)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            if response.status_code in (400, 422):
+                error_data = response.json() if response.content else {}
+                error_message = ""
+                if isinstance(error_data, dict):
+                    error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
+                    raise ContextLengthExceededError(
+                        error_message or "Context window exceeded",
+                        debug_response=error_data if debug else None
+                    )
+            raise
+
+        full_content = ""
+        total_usage = {}
+
+        for line in response.iter_lines():
+            if line:
+                line = line.decode('utf-8')
+                if line.startswith('data: '):
+                    data_str = line[6:]
+                    if data_str.strip() == '[DONE]':
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            full_content += content
+                            yield LLMChunk(content=full_content, is_final=False)
+
+                        if "usage" in data:
+                            total_usage = {
+                                "input_tokens": data["usage"].get("prompt_tokens", 0),
+                                "output_tokens": data["usage"].get("completion_tokens", 0),
+                                "total_tokens": data["usage"].get("total_tokens", 0),
+                            }
+                    except json.JSONDecodeError:
+                        continue
+
+        yield LLMChunk(content=full_content, is_final=True, usage=total_usage)
 
 
 class OpenAIProvider(GenericOpenAIProvider):
@@ -123,8 +223,21 @@ class OpenAIProvider(GenericOpenAIProvider):
                 "body": payload,
             }
 
-        response = requests.post(self.url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            if response.status_code in (400, 422):
+                error_data = response.json() if response.content else {}
+                error_message = ""
+                if isinstance(error_data, dict):
+                    error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
+                    raise ContextLengthExceededError(
+                        error_message or "Context window exceeded",
+                        debug_response=error_data if debug else None
+                    )
+            raise
 
         data = response.json()
         content = data["choices"][0]["message"]["content"]
@@ -180,22 +293,37 @@ class AnthropicProvider(BaseProvider):
             debug_request = {
                 "url": self.url,
                 "method": "POST",
-                "headers": {**headers, "x-api-key": API_KEY_MASK},
+                "headers": {**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
                 "body": payload,
             }
 
-        response = requests.post(self.url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
+        print(f"DEBUG GenericOpenAIProvider: status={response.status_code}, content_length={len(response.content)}")
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            print(f"DEBUG GenericOpenAIProvider: HTTP error: {response.status_code}, body={response.text[:500]}")
+            if response.status_code in (400, 422):
+                error_data = response.json() if response.content else {}
+                error_message = ""
+                if isinstance(error_data, dict):
+                    error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
+                    raise ContextLengthExceededError(
+                        error_message or "Context window exceeded",
+                        debug_response=error_data if debug else None
+                    )
+            raise
 
         data = response.json()
-        content = data["content"][0]["text"]
+        content = data["choices"][0]["message"]["content"]
         
         usage = {}
         if "usage" in data:
             usage = {
-                "input_tokens": data["usage"].get("input_tokens", 0),
-                "output_tokens": data["usage"].get("output_tokens", 0),
-                "total_tokens": data["usage"].get("input_tokens", 0) + data["usage"].get("output_tokens", 0),
+                "input_tokens": data["usage"].get("prompt_tokens", 0),
+                "output_tokens": data["usage"].get("completion_tokens", 0),
+                "total_tokens": data["usage"].get("total_tokens", 0),
             }
 
         if debug:
@@ -232,6 +360,82 @@ class AnthropicProvider(BaseProvider):
 
     def get_provider_name(self) -> str:
         return "anthropic"
+
+    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> Generator[LLMChunk, None, None]:
+        from app.llm.base import LLMChunk
+
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+
+        formatted_messages = []
+        if system_prompt:
+            formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
+
+        for msg in messages:
+            formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
+
+        payload = {
+            "model": self.model,
+            "messages": formatted_messages,
+            "max_tokens": 4096,
+            "stream": True,
+        }
+
+        debug_request = None
+        if debug:
+            debug_request = {
+                "url": self.url,
+                "method": "POST",
+                "headers": {**headers, "x-api-key": API_KEY_MASK},
+                "body": payload,
+            }
+
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout, stream=True)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            if response.status_code in (400, 422):
+                error_data = response.json() if response.content else {}
+                error_message = ""
+                if isinstance(error_data, dict):
+                    error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
+                    raise ContextLengthExceededError(
+                        error_message or "Context window exceeded",
+                        debug_response=error_data if debug else None
+                    )
+            raise
+
+        full_content = ""
+        total_usage = {}
+
+        for line in response.iter_lines():
+            if line:
+                line = line.decode('utf-8')
+                if line.startswith('data: '):
+                    data_str = line[6:]
+                    try:
+                        data = json.loads(data_str)
+                        if data.get("type") == "content_block_delta":
+                            delta = data.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                content = delta.get("text", "")
+                                full_content += content
+                                yield LLMChunk(content=full_content, is_final=False)
+                        elif data.get("type") == "message_delta":
+                            if "usage" in data:
+                                total_usage = {
+                                    "input_tokens": data["usage"].get("input_tokens", 0),
+                                    "output_tokens": data["usage"].get("output_tokens", 0),
+                                    "total_tokens": data["usage"].get("input_tokens", 0) + data["usage"].get("output_tokens", 0),
+                                }
+                    except json.JSONDecodeError:
+                        continue
+
+        yield LLMChunk(content=full_content, is_final=True, usage=total_usage)
 
 
 class OllamaProvider(BaseProvider):
@@ -270,11 +474,35 @@ class OllamaProvider(BaseProvider):
                 "body": payload,
             }
 
-        response = requests.post(self.url, headers=headers, json=payload, timeout=120)
-        response.raise_for_status()
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            if response.status_code in (400, 422):
+                error_data = response.json() if response.content else {}
+                error_message = ""
+                if isinstance(error_data, dict):
+                    error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
+                    raise ContextLengthExceededError(
+                        error_message or "Context window exceeded",
+                        debug_response=error_data if debug else None
+                    )
+            raise
 
         data = response.json()
-        content = data["message"]["content"]
+        print(f"DEBUG GenericOpenAIProvider: response keys = {list(data.keys())}")
+        content = data["choices"][0]["message"]["content"]
+        
+        usage = {}
+        if "usage" in data:
+            usage = {
+                "input_tokens": data["usage"].get("prompt_tokens", 0),
+                "output_tokens": data["usage"].get("completion_tokens", 0),
+                "total_tokens": data["usage"].get("total_tokens", 0),
+            }
+        elif content:
+            usage = estimate_tokens(content)
 
         if debug:
             debug_response = data
@@ -282,10 +510,89 @@ class OllamaProvider(BaseProvider):
         return LLMResponse(
             content=content,
             model=self.model,
-            usage={},
+            usage=usage,
             debug_request=debug_request,
             debug_response=debug_response,
         )
+
+    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> Generator[LLMChunk, None, None]:
+        from app.llm.base import LLMChunk
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        formatted_messages = []
+        if system_prompt:
+            formatted_messages.append({"role": "system", "content": system_prompt})
+
+        for msg in messages:
+            formatted_messages.append({"role": msg.role, "content": msg.content})
+
+        payload = {
+            "model": self.model,
+            "messages": formatted_messages,
+            "temperature": 0.7,
+            "stream": True,
+        }
+
+        debug_request = None
+        if debug:
+            debug_request = {
+                "url": self.url,
+                "method": "POST",
+                "headers": {**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
+                "body": payload,
+            }
+
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout, stream=True)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            if response.status_code in (400, 422):
+                error_data = response.json() if response.content else {}
+                error_message = ""
+                if isinstance(error_data, dict):
+                    error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
+                    raise ContextLengthExceededError(
+                        error_message or "Context window exceeded",
+                        debug_response=error_data if debug else None
+                    )
+            raise
+
+        full_content = ""
+        total_usage = {}
+
+        for line in response.iter_lines():
+            if line:
+                line = line.decode('utf-8')
+                if line.startswith('data: '):
+                    data_str = line[6:]
+                    if data_str.strip() == '[DONE]':
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            full_content += content
+                            yield LLMChunk(content=full_content, is_final=False)
+
+                        if "usage" in data:
+                            total_usage = {
+                                "input_tokens": data["usage"].get("prompt_tokens", 0),
+                                "output_tokens": data["usage"].get("completion_tokens", 0),
+                                "total_tokens": data["usage"].get("total_tokens", 0),
+                            }
+                    except json.JSONDecodeError:
+                        continue
+
+        if not total_usage and full_content:
+            total_usage = estimate_tokens(full_content)
+
+        yield LLMChunk(content=full_content, is_final=True, usage=total_usage)
 
     def list_models(self) -> list[str]:
         try:

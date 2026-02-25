@@ -30,6 +30,18 @@
         </div>
     </header>
 
+    <script>
+        document.addEventListener('click', function(e) {
+            if (typeof isRequestInProgress !== 'undefined' && isRequestInProgress) {
+                const link = e.target.closest('.nav-link');
+                if (link) {
+                    e.preventDefault();
+                    alert('Дождитесь ответа перед переходом');
+                }
+            }
+        });
+    </script>
+
     <main class="main">
         {% block content %}{% endblock %}
     </main>

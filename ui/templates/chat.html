@@ -16,6 +16,10 @@
                 <input type="checkbox" id="debug-toggle" onchange="toggleDebug()">
                 <span>Debug</span>
             </label>
+            <label class="debug-toggle">
+                <input type="checkbox" id="stream-toggle" checked>
+                <span>Stream</span>
+            </label>
             <button class="btn btn-secondary" onclick="resetChat()">Сбросить чат</button>
         </div>
     </div>
@@ -71,6 +75,18 @@
     const modelSelect = document.getElementById('model-select');
     let debugMode = localStorage.getItem('t6_debug') === 'true';
     let currentDebugData = null;
+    let currentTotalInput = 0;
+    let currentTotalOutput = 0;
+    let currentTotalTokens = 0;
+    let abortController = null;
+    let isRequestInProgress = false;
+
+    document.getElementById('send-btn').addEventListener('click', function(e) {
+        if (isRequestInProgress && abortController) {
+            e.preventDefault();
+            abortController.abort();
+        }
+    });
 
     document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('debug-toggle').checked = debugMode;
@@ -83,9 +99,22 @@
 
     function showDebugModal(debugData) {
         currentDebugData = debugData;
-        document.getElementById('debug-json').textContent = JSON.stringify(debugData.request, null, 2);
-        document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
-        document.querySelector('.debug-tab[data-tab="request"]').classList.add('active');
+        const hasRequest = debugData.request;
+        const hasResponse = debugData.response;
+        
+        document.querySelectorAll('.debug-tab').forEach(t => {
+            t.style.display = (hasRequest && hasResponse) ? '' : 'none';
+        });
+        
+        if (hasResponse && !hasRequest) {
+            document.getElementById('debug-json').textContent = JSON.stringify(debugData.response, null, 2);
+            document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.debug-tab[data-tab="response"]').classList.add('active');
+        } else {
+            document.getElementById('debug-json').textContent = JSON.stringify(debugData.request, null, 2);
+            document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.debug-tab[data-tab="request"]').classList.add('active');
+        }
         document.getElementById('debug-modal').style.display = 'flex';
     }
 
@@ -242,16 +271,22 @@
             
             let totalInput = 0;
             let totalOutput = 0;
+            currentTotalInput = 0;
+            currentTotalOutput = 0;
+            currentTotalTokens = 0;
             
             messages.forEach(msg => {
-                addMessage(msg.content, msg.role, msg.debug || null);
+                addMessage(msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null);
                 if (msg.usage) {
                     totalInput += msg.usage.input_tokens || 0;
                     totalOutput += msg.usage.output_tokens || 0;
                 }
             });
             
-            updateStats(totalInput, totalOutput, totalInput + totalOutput);
+            currentTotalInput = totalInput;
+            currentTotalOutput = totalOutput;
+            currentTotalTokens = totalInput + totalOutput;
+            updateStats(currentTotalInput, currentTotalOutput, currentTotalTokens);
         } catch (err) {
             console.error('Failed to load messages:', err);
         }
@@ -279,8 +314,14 @@
         if (!message) return;
 
         const sendBtn = document.getElementById('send-btn');
-        sendBtn.disabled = true;
-        sendBtn.textContent = '...';
+        const streamToggle = document.getElementById('stream-toggle');
+        const useStream = streamToggle.checked;
+
+        isRequestInProgress = true;
+        abortController = new AbortController();
+        
+        sendBtn.textContent = 'Стоп';
+        messageInput.disabled = true;
 
         addMessage(message, 'user');
 
@@ -289,39 +330,187 @@
         const sessionId = getSessionId();
         
         try {
+            if (useStream) {
+                await sendStreamMessage(message, provider, model, sessionId, sendBtn);
+            } else {
+                await sendRegularMessage(message, provider, model, sessionId, sendBtn);
+            }
+        } finally {
+            messageInput.value = '';
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Отправить';
+            isRequestInProgress = false;
+            abortController = null;
+        }
+    });
+
+    async function sendRegularMessage(message, provider, model, sessionId, sendBtn) {
+        try {
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Session-Id': sessionId,
                 },
+                signal: abortController ? abortController.signal : null,
                 body: JSON.stringify({ message, provider, model, debug: debugMode })
             });
 
             const data = await response.json();
 
             if (data.error) {
-                addMessage('Ошибка: ' + data.error, 'error');
+                messageInput.value = message;
+                const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
+                addMessage('Ошибка: ' + data.error, 'error', errorDebug);
             } else {
-                addMessage(data.message, 'assistant', data.debug || null);
+                const usage = data.usage || null;
+                addMessage(data.message, 'assistant', data.debug || null, usage, data.model || null);
                 if (data.usage) {
                     const inputTokens = data.usage.input_tokens || 0;
                     const outputTokens = data.usage.output_tokens || 0;
-                    const totalTokens = data.total_tokens || 0;
-                    updateStats(inputTokens, outputTokens, totalTokens);
+                    const totalTokens = data.usage.total_tokens || (inputTokens + outputTokens);
+                    currentTotalInput += inputTokens;
+                    currentTotalOutput += outputTokens;
+                    currentTotalTokens += totalTokens;
+                    updateStats(currentTotalInput, currentTotalOutput, currentTotalTokens);
                 }
                 saveUserSettings();
             }
         } catch (err) {
+            if (err.name === 'AbortError') {
+                addMessage('Запрос прерван', 'error');
+                return;
+            }
+            messageInput.value = message;
             addMessage('Ошибка соединения: ' + err.message, 'error');
         }
+    }
 
-        messageInput.value = '';
-        sendBtn.disabled = false;
-        sendBtn.textContent = 'Отправить';
-    });
+    async function sendStreamMessage(message, provider, model, sessionId, sendBtn) {
+        let assistantDiv = null;
+        let messageContent = null;
 
-    function addMessage(content, role, debugData = null) {
+        try {
+            const response = await fetch('/api/chat/stream', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Session-Id': sessionId,
+                },
+                signal: abortController ? abortController.signal : null,
+                body: JSON.stringify({ message, provider, model, debug: debugMode })
+            });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let fullContent = '';
+
+            assistantDiv = document.createElement('div');
+            assistantDiv.className = 'message message-assistant';
+            messageContent = document.createElement('div');
+            messageContent.className = 'message-content';
+            messageContent.innerHTML = '';
+            assistantDiv.appendChild(messageContent);
+            chatMessages.appendChild(assistantDiv);
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.slice(6);
+                        if (dataStr === '[DONE]') continue;
+
+                        try {
+                            const data = JSON.parse(dataStr);
+
+                            if (data.error) {
+                                messageInput.value = message;
+                                assistantDiv.remove();
+                                const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
+                                addMessage('Ошибка: ' + data.error, 'error', errorDebug);
+                                return;
+                            }
+
+                            if (data.done) {
+                                let modelName = null;
+                                if (data.debug && data.debug.response && data.debug.response.model) {
+                                    modelName = data.debug.response.model;
+                                }
+                                
+                                if (data.usage) {
+                                    const inputTokens = data.usage.input_tokens || 0;
+                                    const outputTokens = data.usage.output_tokens || 0;
+                                    const totalTokens = data.usage.total_tokens || (inputTokens + outputTokens);
+                                    currentTotalInput += inputTokens;
+                                    currentTotalOutput += outputTokens;
+                                    currentTotalTokens += totalTokens;
+                                    updateStats(currentTotalInput, currentTotalOutput, currentTotalTokens);
+                                    
+                                    const tokensDiv = document.createElement('div');
+                                    tokensDiv.className = 'message-tokens';
+                                    const tokensInfo = `вх: ${inputTokens} | вых: ${outputTokens} | всего: ${totalTokens}`;
+                                    tokensDiv.textContent = modelName ? modelName + ' • ' + tokensInfo : tokensInfo;
+                                    assistantDiv.appendChild(tokensDiv);
+                                } else if (modelName) {
+                                    const tokensDiv = document.createElement('div');
+                                    tokensDiv.className = 'message-tokens';
+                                    tokensDiv.textContent = modelName;
+                                    assistantDiv.appendChild(tokensDiv);
+                                }
+                                messageContent.innerHTML = marked.parse(fullContent.trim());
+                                
+                                const plainContent = fullContent.replace(/<[^>]*>/g, '');
+                                const copyBtn = document.createElement('button');
+                                copyBtn.className = 'message-copy-btn';
+                                copyBtn.textContent = '📋';
+                                copyBtn.title = 'Копировать';
+                                copyBtn.onclick = function() { copyMessage(this, 'assistant'); };
+                                copyBtn.setAttribute('data-content', plainContent);
+                                assistantDiv.appendChild(copyBtn);
+                                
+                                if (debugMode && data.debug) {
+                                    const debugBtn = document.createElement('button');
+                                    debugBtn.className = 'message-debug-btn';
+                                    debugBtn.textContent = '🔍';
+                                    debugBtn.title = 'Debug';
+                                    debugBtn.onclick = function() { showDebugModal(data.debug); };
+                                    assistantDiv.appendChild(debugBtn);
+                                }
+                                
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                                saveUserSettings();
+                            } else {
+                                fullContent = data.content || '';
+                                messageContent.innerHTML = marked.parse(fullContent.trim());
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            messageInput.value = message;
+            if (err.name === 'AbortError') {
+                if (assistantDiv) assistantDiv.remove();
+                addMessage('Запрос прерван', 'error');
+                return;
+            }
+            if (assistantDiv) assistantDiv.remove();
+            addMessage('Ошибка соединения: ' + err.message, 'error');
+        }
+    }
+
+    function addMessage(content, role, debugData = null, usage = null, model = null) {
         const div = document.createElement('div');
         div.className = `message message-${role}`;
         
@@ -332,7 +521,26 @@
             html = `<div class="message-content">${escapeHtml(content)}</div>`;
         }
         
-        if (role === 'assistant' && debugData) {
+        if (role === 'assistant') {
+            let tokensInfo = '';
+            if (usage) {
+                const inTokens = usage.input_tokens || 0;
+                const outTokens = usage.output_tokens || 0;
+                const totalTokens = usage.total_tokens || (inTokens + outTokens);
+                tokensInfo = `вх: ${inTokens} | вых: ${outTokens} | всего: ${totalTokens}`;
+            }
+            if (tokensInfo || model) {
+                html += `<div class="message-tokens">${model ? model + (tokensInfo ? ' • ' : '') : ''}${tokensInfo}</div>`;
+            }
+        }
+        
+        if (role === 'user' || role === 'assistant' || role === 'error') {
+            const plainContent = role === 'assistant' ? content.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"') : content;
+            const escapedContent = plainContent.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            html += `<button class="message-copy-btn" onclick="copyMessage(this, '${role}')" data-content="${escapedContent}" title="Копировать">📋</button>`;
+        }
+        
+        if ((role === 'assistant' || role === 'error') && debugData) {
             if (debugData.request || debugData.response) {
                 html += `<button class="message-debug-btn" onclick="showDebugModal(${escapeHtml(JSON.stringify(debugData)).replace(/"/g, '&quot;')})" title="Debug">🔍</button>`;
             }
@@ -342,6 +550,16 @@
         
         chatMessages.appendChild(div);
         chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function copyMessage(btn, role) {
+        const content = btn.getAttribute('data-content') || '';
+        const text = role === 'assistant' ? content.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : content;
+        navigator.clipboard.writeText(text).then(() => {
+            const original = btn.textContent;
+            btn.textContent = '✓';
+            setTimeout(() => btn.textContent = original, 1000);
+        });
     }
 
     function escapeHtml(text) {

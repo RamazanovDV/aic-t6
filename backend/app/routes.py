@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request, Response
 from app.config import config
 from app.context import get_system_prompt
 from app.llm import ProviderFactory
+from app.llm.providers import ContextLengthExceededError
 from app.session import session_manager
 
 api_bp = Blueprint("api", __name__)
@@ -54,9 +55,19 @@ def chat():
     if not provider_config:
         return jsonify({"error": f"Unknown provider: {provider_name}"}), 400
     
+    provider_config = provider_config.copy()
+    
     if model:
-        provider_config = provider_config.copy()
         provider_config["model"] = model
+    else:
+        default_model = config.get_default_model(provider_name)
+        if default_model:
+            provider_config["model"] = default_model
+        else:
+            return jsonify({"error": f"No model specified and no default model for provider: {provider_name}"}), 400
+    
+    if "timeout" not in provider_config:
+        provider_config["timeout"] = config.timeout
 
     try:
         provider = ProviderFactory.create(provider_name, provider_config)
@@ -70,12 +81,17 @@ def chat():
     if provider_name and model:
         session.set_provider_model(provider_name, model)
     elif provider_name and not session.provider:
-        session.set_provider_model(provider_name, provider_config.get("model", ""))
+        session.set_provider_model(provider_name, config.get_default_model(provider_name))
 
     system_prompt = get_system_prompt()
 
     try:
         response = provider.chat(session.messages, system_prompt, debug=debug_mode)
+    except ContextLengthExceededError as e:
+        result = {"error": str(e), "error_type": "context_length_exceeded"}
+        if debug_mode and e.debug_response:
+            result["debug"] = {"response": e.debug_response}
+        return jsonify(result), 400
     except Exception as e:
         return jsonify({"error": f"LLM error: {str(e)}"}), 500
 
@@ -101,6 +117,115 @@ def chat():
         result["debug"] = debug_info
     
     return jsonify(result)
+
+
+@api_bp.route("/chat/stream", methods=["POST"])
+@require_auth
+def chat_stream():
+    data = request.get_json()
+    if not data or "message" not in data:
+        return jsonify({"error": "Missing 'message' field"}), 400
+
+    user_message = data["message"]
+    provider_name = data.get("provider")
+    model = data.get("model")
+    debug_mode = data.get("debug", False)
+
+    if not provider_name:
+        provider_name = config.default_provider
+
+    provider_config = config.get_provider_config(provider_name)
+    if not provider_config:
+        return jsonify({"error": f"Unknown provider: {provider_name}"}), 400
+
+    provider_config = provider_config.copy()
+    
+    if model:
+        provider_config["model"] = model
+    else:
+        default_model = config.get_default_model(provider_name)
+        if default_model:
+            provider_config["model"] = default_model
+        else:
+            return jsonify({"error": f"No model specified and no default model for provider: {provider_name}"}), 400
+
+    if "timeout" not in provider_config:
+        provider_config["timeout"] = config.timeout
+
+    try:
+        provider = ProviderFactory.create(provider_name, provider_config)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    session_id = get_session_id()
+    session = session_manager.get_session(session_id)
+    session.add_user_message(user_message)
+
+    if provider_name and model:
+        session.set_provider_model(provider_name, model)
+    elif provider_name and not session.provider:
+        session.set_provider_model(provider_name, config.get_default_model(provider_name))
+
+    system_prompt = get_system_prompt()
+
+    formatted_messages = []
+    if system_prompt:
+        formatted_messages.append({"role": "system", "content": system_prompt})
+    for msg in session.messages:
+        formatted_messages.append({"role": msg.role, "content": msg.content})
+
+    def generate():
+        full_content = ""
+        total_usage = {}
+        debug_request = None
+        debug_response = None
+
+        if debug_mode:
+            debug_request = {
+                "url": provider.url,
+                "method": "POST",
+                "model": provider.model,
+                "headers": {"Content-Type": "application/json"},
+                "body": {
+                    "model": provider.model,
+                    "messages": formatted_messages,
+                    "temperature": 0.7,
+                    "stream": True,
+                },
+            }
+
+        try:
+            for chunk in provider.stream_chat(session.messages, system_prompt, debug=debug_mode):
+                if chunk.is_final:
+                    total_usage = chunk.usage
+                    debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
+                    break
+
+                full_content = chunk.content
+                yield f"data: {json.dumps({'content': full_content, 'done': False})}\n\n"
+
+            if not full_content:
+                raise Exception("Empty response from provider")
+
+            yield f"data: {json.dumps({'content': full_content, 'done': True, 'usage': total_usage, 'debug': {'request': debug_request, 'response': debug_response}})}\n\n"
+
+            session.add_assistant_message(full_content, total_usage)
+            session_manager.save_session(session_id)
+
+        except ContextLengthExceededError as e:
+            error_data = {"error": str(e), "error_type": "context_length_exceeded", "content_received": full_content}
+            if debug_mode and e.debug_response:
+                error_data["debug"] = {"request": debug_request, "response": e.debug_response}
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            error_data = {"error": f"LLM error: {str(e)}", "content_received": full_content}
+            if debug_mode:
+                error_data["debug"] = {"request": debug_request, "response": {"error": str(e), "content_length": len(full_content)}}
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    return Response(generate(), mimetype="text/event-stream")
 
 
 @api_bp.route("/chat/reset", methods=["POST"])
@@ -270,13 +395,19 @@ def list_models(provider_name: str):
     if not provider_config:
         return jsonify({"error": f"Provider '{provider_name}' not found in config", "available": list(config.providers.keys())}), 400
 
+    provider_config = provider_config.copy()
+    default_model = config.get_default_model(provider_name)
+    if default_model:
+        provider_config["model"] = default_model
+    elif "model" not in provider_config:
+        provider_config["model"] = "gpt-4o-mini"
+
     try:
         provider = ProviderFactory.create(provider_name, provider_config)
         if hasattr(provider, "list_models"):
             models = provider.list_models()
             return jsonify({"models": models})
-        default_model = provider_config.get("model", "")
-        return jsonify({"models": [default_model] if default_model else []})
+        return jsonify({"models": [provider.model] if provider.model else []})
     except ValueError as e:
         return jsonify({"error": f"ValueError: {str(e)}"}), 400
     except Exception as e:

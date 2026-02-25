@@ -3,7 +3,7 @@ from pathlib import Path
 
 import requests
 import yaml
-from flask import Blueprint, Flask, jsonify, render_template, request
+from flask import Blueprint, Flask, Response, jsonify, render_template, request
 
 ui_bp = Blueprint("ui", __name__)
 
@@ -115,6 +115,44 @@ def chat():
         result = response.json()
         result["session_id"] = session_id
         return jsonify(result)
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/chat/stream", methods=["POST"])
+def chat_stream():
+    data = request.get_json()
+    if not data or "message" not in data:
+        return jsonify({"error": "Missing 'message' field"}), 400
+
+    user_message = data["message"]
+    provider_name = data.get("provider")
+    model = data.get("model")
+    debug_mode = data.get("debug", False)
+    session_id = get_session_id()
+
+    url = f"{ui_config.backend_url}/chat/stream"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "X-Session-Id": session_id,
+        "Content-Type": "application/json",
+    }
+
+    payload = {"message": user_message, "debug": debug_mode}
+    if provider_name:
+        payload["provider"] = provider_name
+    if model:
+        payload["model"] = model
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=120, stream=True)
+        response.raise_for_status()
+
+        def generate():
+            for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                yield chunk
+
+        return Response(generate(), mimetype="text/event-stream")
     except requests.RequestException as e:
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 

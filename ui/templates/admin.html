@@ -80,12 +80,21 @@
         
         <div class="form-group">
             <label for="provider-name">Имя провайдера</label>
-            <input type="text" id="provider-name" class="form-input" placeholder="openai">
+            <input type="text" id="provider-name" class="form-input" placeholder="my-provider">
+        </div>
+        
+        <div class="form-group">
+            <label for="provider-type">Тип API</label>
+            <select id="provider-type" class="form-input">
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="ollama">Ollama</option>
+            </select>
         </div>
         
         <div class="form-group">
             <label for="provider-url">URL</label>
-            <input type="text" id="provider-url" class="form-input" placeholder="https://api.openai.com/v1">
+            <input type="text" id="provider-url" class="form-input" placeholder="https://api.openai.com/v1" onchange="updateUrlPlaceholder()">
         </div>
         
         <div class="form-group">
@@ -94,13 +103,13 @@
         </div>
         
         <div class="form-group">
-            <label for="provider-model">Модель</label>
-            <input type="text" id="provider-model" class="form-input" placeholder="gpt-4o-mini">
+            <label for="provider-default-model">Модель по умолчанию</label>
+            <input type="text" id="provider-default-model" class="form-input" placeholder="Модель по умолчанию">
         </div>
         
         <div class="form-group">
-            <label for="provider-default-model">Модель по умолчанию</label>
-            <input type="text" id="provider-default-model" class="form-input" placeholder="Модель по умолчанию">
+            <label for="provider-timeout">Таймаут (сек)</label>
+            <input type="number" id="provider-timeout" class="form-input" placeholder="120" min="10" max="600">
         </div>
         
         <div class="modal-actions">
@@ -181,23 +190,43 @@
         
         let html = '<div class="providers-cards">';
         for (const [name, cfg] of Object.entries(providers)) {
+            const isDefault = config.default_provider === name;
             html += `
                 <div class="provider-card">
-                    <h4>${name}</h4>
+                    <h4>${name} ${isDefault ? '✓' : ''}</h4>
                     <div class="provider-info">
+                        <div><strong>Тип:</strong> ${cfg.type || 'openai'}</div>
                         <div><strong>URL:</strong> ${cfg.url || '-'}</div>
-                        <div><strong>Модель:</strong> ${cfg.model || '-'}</div>
-                        <div><strong>По умолчанию:</strong> ${defaultModels[name] || '-'}</div>
+                        <div><strong>Модель по умолчанию:</strong> ${defaultModels[name] || '-'}</div>
                     </div>
                     <div class="provider-actions">
                         <button class="btn btn-small" onclick="editProvider('${name}')">Редактировать</button>
                         <button class="btn btn-small btn-secondary" onclick="validateProvider('${name}')">Проверить</button>
+                        ${!isDefault ? `<button class="btn btn-small btn-secondary" onclick="setDefaultProvider('${name}')">По умолчанию</button>` : ''}
                     </div>
                 </div>
             `;
         }
         html += '</div>';
         container.innerHTML = html;
+    }
+
+    async function setDefaultProvider(name) {
+        try {
+            const response = await fetch('/api/admin/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ default_provider: name })
+            });
+            
+            if (response.ok) {
+                loadConfig();
+            } else {
+                alert('Ошибка сохранения');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
     }
 
     async function saveApiKey() {
@@ -225,10 +254,11 @@
         document.getElementById('modal-title').textContent = 'Добавить провайдера';
         document.getElementById('edit-provider-name').value = '';
         document.getElementById('provider-name').value = '';
+        document.getElementById('provider-type').value = 'openai';
         document.getElementById('provider-url').value = '';
         document.getElementById('provider-api-key').value = '';
-        document.getElementById('provider-model').value = '';
         document.getElementById('provider-default-model').value = '';
+        document.getElementById('provider-timeout').value = '';
         document.getElementById('btn-delete-provider').style.display = 'none';
         document.getElementById('provider-name').disabled = false;
         document.getElementById('provider-modal').style.display = 'flex';
@@ -239,10 +269,11 @@
         document.getElementById('modal-title').textContent = 'Редактировать провайдера';
         document.getElementById('edit-provider-name').value = name;
         document.getElementById('provider-name').value = name;
+        document.getElementById('provider-type').value = provider.type || 'openai';
         document.getElementById('provider-url').value = provider.url || '';
         document.getElementById('provider-api-key').value = provider.api_key || '';
-        document.getElementById('provider-model').value = provider.model || '';
         document.getElementById('provider-default-model').value = defaultModels[name] || '';
+        document.getElementById('provider-timeout').value = provider.timeout || '';
         document.getElementById('btn-delete-provider').style.display = 'inline-block';
         document.getElementById('provider-name').disabled = true;
         document.getElementById('provider-modal').style.display = 'flex';
@@ -252,15 +283,28 @@
         document.getElementById('provider-modal').style.display = 'none';
     }
 
+    function updateUrlPlaceholder() {
+        const type = document.getElementById('provider-type').value;
+        const placeholders = {
+            'openai': 'https://api.openai.com/v1',
+            'anthropic': 'https://api.anthropic.com',
+            'ollama': 'http://localhost:11434'
+        };
+        document.getElementById('provider-url').placeholder = placeholders[type] || placeholders['openai'];
+    }
+
+    document.getElementById('provider-type').addEventListener('change', updateUrlPlaceholder);
+
     async function saveProvider() {
         const oldName = document.getElementById('edit-provider-name').value;
         const name = document.getElementById('provider-name').value.trim();
+        const type = document.getElementById('provider-type').value;
         const url = document.getElementById('provider-url').value.trim();
         const apiKey = document.getElementById('provider-api-key').value;
-        const model = document.getElementById('provider-model').value.trim();
         const defaultModel = document.getElementById('provider-default-model').value.trim();
+        const timeout = document.getElementById('provider-timeout').value;
         
-        if (!name || !url || !model) {
+        if (!name || !url || !defaultModel) {
             alert('Заполните обязательные поля');
             return;
         }
@@ -272,10 +316,14 @@
         }
         
         providers[name] = {
+            type: type,
             url: url,
             api_key: apiKey,
-            model: model,
         };
+
+        if (timeout) {
+            providers[name].timeout = parseInt(timeout, 10);
+        }
 
         const newDefaultModels = { ...defaultModels };
         if (defaultModel) {
@@ -338,6 +386,7 @@
 
     async function validateProvider(name) {
         const provider = config.providers[name];
+        const model = defaultModels[name] || '';
         
         try {
             const response = await fetch('/api/admin/config/validate', {
@@ -345,7 +394,10 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     provider: name,
-                    config: provider
+                    config: {
+                        ...provider,
+                        model: model
+                    }
                 })
             });
             

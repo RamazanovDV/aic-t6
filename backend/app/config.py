@@ -68,6 +68,10 @@ class Config:
         return self.llm.get("default_provider", "openai")
 
     @property
+    def timeout(self) -> int:
+        return self.llm.get("timeout", 120)
+
+    @property
     def providers(self) -> dict[str, dict[str, Any]]:
         return self.llm.get("providers", {})
 

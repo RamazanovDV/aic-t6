@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Generator
 
 
 @dataclass
@@ -20,14 +20,26 @@ class LLMResponse:
     debug_response: dict | None = None
 
 
+@dataclass
+class LLMChunk:
+    content: str
+    is_final: bool
+    usage: dict[str, int] = field(default_factory=dict)
+
+
 class BaseProvider(ABC):
-    def __init__(self, url: str, api_key: str, model: str):
+    def __init__(self, url: str, api_key: str, model: str, timeout: int = 120):
         self.url = url
         self.api_key = api_key
         self.model = model
+        self.timeout = timeout
 
     @abstractmethod
     def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> LLMResponse:
+        pass
+
+    @abstractmethod
+    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> Generator[LLMChunk, None, None]:
         pass
 
     @abstractmethod
@@ -46,21 +58,43 @@ class ProviderFactory:
     def create(cls, name: str, config: dict[str, Any]) -> BaseProvider:
         from app.llm.providers import GenericOpenAIProvider
 
-        if name in cls._providers:
-            provider_class = cls._providers[name]
+        provider_type = config.get("type", name)
+        
+        if provider_type not in cls._providers:
+            url = config.get("url", "").lower()
+            if "anthropic" in url:
+                provider_type = "anthropic"
+            elif "ollama" in url:
+                provider_type = "ollama"
+            else:
+                provider_type = "openai"
+        
+        if provider_type in cls._providers:
+            provider_class = cls._providers[provider_type]
         elif config.get("url") and config.get("api_key") and config.get("model"):
             provider_class = GenericOpenAIProvider
         else:
             raise ValueError(f"Unknown provider: {name}. Available: {list(cls._providers.keys())}")
 
-        url = config.get("url", "")
-        if url and "/chat/completions" not in url and "/messages" not in url:
+        url = config.get("url", "").strip()
+        
+        default_urls = {
+            "openai": "https://api.openai.com/v1/chat/completions",
+            "anthropic": "https://api.anthropic.com/v1/messages",
+            "ollama": "http://localhost:11434",
+        }
+        
+        if not url:
+            url = default_urls.get(provider_type, "")
+        
+        if url and "/chat/completions" not in url and "/messages" not in url and provider_type != "ollama":
             url = url.rstrip("/") + "/chat/completions"
 
         return provider_class(
             url=url,
             api_key=config.get("api_key", ""),
             model=config.get("model", ""),
+            timeout=config.get("timeout", 120),
         )
 
     @classmethod
