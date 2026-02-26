@@ -153,28 +153,41 @@
             if (response.ok) {
                 const data = await response.json();
                 const providers = data.providers || {};
+                const availableProviders = Object.keys(providers);
+                const defaultProvider = data.default_provider || '';
                 
                 providerSelect.innerHTML = '<option value="">По умолчанию</option>';
-                for (const name of Object.keys(providers)) {
+                for (const name of availableProviders) {
                     const option = document.createElement('option');
                     option.value = name;
                     option.textContent = name;
                     providerSelect.appendChild(option);
                 }
                 
-                if (data.default_provider) {
-                    providerSelect.value = data.default_provider;
+                const sessionResponse = await fetch(`/api/sessions/${getSessionId()}`);
+                let sessionProvider = '';
+                let sessionModel = '';
+                if (sessionResponse.ok) {
+                    const sessionData = await sessionResponse.json();
+                    sessionProvider = sessionData.provider || '';
+                    sessionModel = sessionData.model || '';
                 }
                 
-                await loadModels();
-                await loadUserSettings();
+                let selectedProvider = defaultProvider;
+                if (sessionProvider && availableProviders.includes(sessionProvider)) {
+                    selectedProvider = sessionProvider;
+                }
+                
+                providerSelect.value = selectedProvider;
+                
+                await loadModels(sessionModel);
             }
         } catch (err) {
             console.error('Failed to load providers:', err);
         }
     }
 
-    async function loadModels() {
+    async function loadModels(preferredModel = null) {
         const provider = providerSelect.value;
         if (!provider) {
             modelSelect.innerHTML = '<option value="">Выберите провайдер</option>';
@@ -198,6 +211,11 @@
                         option.textContent = model;
                         modelSelect.appendChild(option);
                     });
+                    
+                    if (preferredModel && data.models.includes(preferredModel)) {
+                        modelSelect.value = preferredModel;
+                    }
+                    
                     modelSelect.disabled = false;
                 } else {
                     modelSelect.innerHTML = '<option value="">Нет доступных моделей</option>';

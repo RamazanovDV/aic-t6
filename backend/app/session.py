@@ -29,6 +29,11 @@ class Session:
             self.total_tokens += usage.get("total_tokens", 0)
         self.updated_at = datetime.now()
 
+    def add_error_message(self, content: str, debug: dict | None = None, model: str | None = None) -> None:
+        msg = Message(role="error", content=content, usage={}, debug=debug, model=model)
+        self.messages.append(msg)
+        self.updated_at = datetime.now()
+
     def set_provider_model(self, provider: str, model: str) -> None:
         self.provider = provider
         self.model = model
