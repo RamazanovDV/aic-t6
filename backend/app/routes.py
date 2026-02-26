@@ -88,12 +88,17 @@ def chat():
     try:
         response = provider.chat(session.messages, system_prompt, debug=debug_mode)
     except ContextLengthExceededError as e:
-        result = {"error": str(e), "error_type": "context_length_exceeded"}
+        session.add_assistant_message(f"[Ошибка] {str(e)}", None, debug=e.debug_response if debug_mode else None)
+        session_manager.save_session(session_id)
+        result = {"error": str(e), "error_type": "context_length_exceeded", "model": provider.model}
         if debug_mode and e.debug_response:
             result["debug"] = {"response": e.debug_response}
         return jsonify(result), 400
     except Exception as e:
-        return jsonify({"error": f"LLM error: {str(e)}"}), 500
+        session.add_assistant_message(f"[Ошибка] {str(e)}", None, None)
+        session_manager.save_session(session_id)
+        result = {"error": f"LLM error: {str(e)}", "model": provider.model}
+        return jsonify(result), 500
 
     debug_info = None
     if debug_mode:
@@ -213,11 +218,15 @@ def chat_stream():
             session_manager.save_session(session_id)
 
         except ContextLengthExceededError as e:
+            session.add_assistant_message(f"[Ошибка] {str(e)}", None, debug=e.debug_response if debug_mode else None)
+            session_manager.save_session(session_id)
             error_data = {"error": str(e), "error_type": "context_length_exceeded", "content_received": full_content}
             if debug_mode and e.debug_response:
                 error_data["debug"] = {"request": debug_request, "response": e.debug_response}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
         except Exception as e:
+            session.add_assistant_message(f"[Ошибка] {str(e)}", None, None)
+            session_manager.save_session(session_id)
             error_data = {"error": f"LLM error: {str(e)}", "content_received": full_content}
             if debug_mode:
                 error_data["debug"] = {"request": debug_request, "response": {"error": str(e), "content_length": len(full_content)}}

@@ -20,7 +20,7 @@
                 <input type="checkbox" id="stream-toggle" checked>
                 <span>Stream</span>
             </label>
-            <button class="btn btn-secondary" onclick="resetChat()">Сбросить чат</button>
+            <button class="btn btn-secondary" onclick="resetChat()" title="Сбросить чат">🗑️</button>
         </div>
     </div>
 
@@ -362,7 +362,7 @@
             if (data.error) {
                 messageInput.value = message;
                 const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
-                addMessage('Ошибка: ' + data.error, 'error', errorDebug);
+                addMessage('Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
             } else {
                 const usage = data.usage || null;
                 addMessage(data.message, 'assistant', data.debug || null, usage, data.model || null);
@@ -435,7 +435,7 @@
                                 messageInput.value = message;
                                 assistantDiv.remove();
                                 const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
-                                addMessage('Ошибка: ' + data.error, 'error', errorDebug);
+                                addMessage('Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
                                 return;
                             }
 
