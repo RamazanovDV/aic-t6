@@ -2,16 +2,26 @@
 
 {% block content %}
 <div class="chat-container">
+    <div class="session-panel">
+        <span class="panel-label">Сессия:</span>
+        <select id="session-select" class="session-select" onchange="switchSession(this.value)">
+            <option value="default">default</option>
+        </select>
+        <button class="btn btn-small" onclick="createNewSession()" title="Новая сессия">+</button>
+        <button class="btn btn-small" onclick="renameCurrentSession()" title="Переименовать">✎</button>
+    </div>
+
     <div class="chat-header">
-        <h2>Чат с AI</h2>
-        <div class="chat-controls">
-            <select id="provider-select" class="provider-select" onchange="onProviderChange()">
-                <option value="">По умолчанию</option>
-            </select>
-            <select id="model-select" class="model-select" disabled>
-                <option value="">Выберите модель</option>
-            </select>
-            <button class="btn btn-icon" onclick="loadModels()" title="Обновить модели">↻</button>
+        <span class="panel-label">Провайдер:</span>
+        <select id="provider-select" class="provider-select" onchange="onProviderChange()">
+            <option value="">По умолчанию</option>
+        </select>
+        <span class="panel-label">Модель:</span>
+        <select id="model-select" class="model-select" disabled>
+            <option value="">Выберите модель</option>
+        </select>
+        <button class="btn btn-icon btn-refresh" onclick="loadModels()" title="Обновить модели">↻</button>
+        <div class="chat-header-right">
             <label class="debug-toggle">
                 <input type="checkbox" id="debug-toggle" onchange="toggleDebug()">
                 <span>Debug</span>
@@ -20,8 +30,8 @@
                 <input type="checkbox" id="stream-toggle" checked>
                 <span>Stream</span>
             </label>
-            <button class="btn btn-secondary" onclick="resetChat()" title="Сбросить чат">🗑️</button>
         </div>
+        <button class="btn btn-secondary" onclick="resetChat()" title="Сбросить чат">🗑️</button>
     </div>
 
     <div class="chat-stats" id="chat-stats" style="display: none;">
@@ -558,6 +568,7 @@
 
     async function sendStreamMessage(message, provider, model, sessionId, sendBtn) {
         let assistantDiv = null;
+        let assistantRow = null;
         let messageContent = null;
 
         try {
@@ -576,13 +587,18 @@
             let buffer = '';
             let fullContent = '';
 
+            const assistantRow = document.createElement('div');
+            assistantRow.className = 'message-row message-assistant';
+            
             assistantDiv = document.createElement('div');
             assistantDiv.className = 'message message-assistant';
             messageContent = document.createElement('div');
             messageContent.className = 'message-content';
             messageContent.innerHTML = '';
             assistantDiv.appendChild(messageContent);
-            chatMessages.appendChild(assistantDiv);
+            assistantRow.appendChild(assistantDiv);
+            
+            chatMessages.appendChild(assistantRow);
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -602,7 +618,7 @@
 
                             if (data.error) {
                                 messageInput.value = message;
-                                assistantDiv.remove();
+                                assistantRow.remove();
                                 const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
                                 addMessage('Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
                                 return;
@@ -613,6 +629,8 @@
                                 if (data.debug && data.debug.response && data.debug.response.model) {
                                     modelName = data.debug.response.model;
                                 }
+                                
+                                messageContent.innerHTML = marked.parse(fullContent.trim());
                                 
                                 if (data.usage) {
                                     const inputTokens = data.usage.input_tokens || 0;
@@ -634,16 +652,18 @@
                                     tokensDiv.textContent = modelName;
                                     assistantDiv.appendChild(tokensDiv);
                                 }
-                                messageContent.innerHTML = marked.parse(fullContent.trim());
                                 
                                 const plainContent = fullContent.replace(/<[^>]*>/g, '');
+                                const actionsDiv = document.createElement('div');
+                                actionsDiv.className = 'message-actions';
+                                
                                 const copyBtn = document.createElement('button');
                                 copyBtn.className = 'message-copy-btn';
                                 copyBtn.textContent = '📋';
                                 copyBtn.title = 'Копировать';
                                 copyBtn.onclick = function() { copyMessage(this, 'assistant'); };
                                 copyBtn.setAttribute('data-content', plainContent);
-                                assistantDiv.appendChild(copyBtn);
+                                actionsDiv.appendChild(copyBtn);
                                 
                                 if (debugMode && data.debug) {
                                     const debugBtn = document.createElement('button');
@@ -651,8 +671,9 @@
                                     debugBtn.textContent = '🔍';
                                     debugBtn.title = 'Debug';
                                     debugBtn.onclick = function() { showDebugModal(data.debug); };
-                                    assistantDiv.appendChild(debugBtn);
+                                    actionsDiv.appendChild(debugBtn);
                                 }
+                                assistantRow.appendChild(actionsDiv);
                                 
                                 chatMessages.scrollTop = chatMessages.scrollHeight;
                                 saveUserSettings();
@@ -670,26 +691,30 @@
         } catch (err) {
             messageInput.value = message;
             if (err.name === 'AbortError') {
-                if (assistantDiv) assistantDiv.remove();
+                if (assistantRow) assistantRow.remove();
                 addMessage('Запрос прерван', 'error');
                 return;
             }
-            if (assistantDiv) assistantDiv.remove();
+            if (assistantRow) assistantRow.remove();
             addMessage('Ошибка соединения: ' + err.message, 'error');
         }
     }
 
     function addMessage(content, role, debugData = null, usage = null, model = null) {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = `message-row message-${role}`;
+        
         const div = document.createElement('div');
         div.className = `message message-${role}`;
         
-        let html = '';
+        let contentHtml = '';
         if (role === 'assistant') {
-            html = `<div class="message-content">${marked.parse(content.trim())}</div>`;
+            contentHtml = `<div class="message-content">${marked.parse(content.trim())}</div>`;
         } else {
-            html = `<div class="message-content">${escapeHtml(content)}</div>`;
+            contentHtml = `<div class="message-content">${escapeHtml(content)}</div>`;
         }
         
+        let tokensHtml = '';
         if (role === 'assistant') {
             let tokensInfo = '';
             if (usage) {
@@ -699,23 +724,36 @@
                 tokensInfo = `вх: ${inTokens} | вых: ${outTokens} | всего: ${totalTokens}`;
             }
             if (tokensInfo || model) {
-                html += `<div class="message-tokens">${model ? model + (tokensInfo ? ' • ' : '') : ''}${tokensInfo}</div>`;
+                tokensHtml = `<div class="message-tokens">${model ? model + (tokensInfo ? ' • ' : '') : ''}${tokensInfo}</div>`;
             }
         }
         
+        let html = contentHtml;
+        if (tokensHtml) {
+            html += tokensHtml;
+        }
+        div.innerHTML = html;
+        rowDiv.appendChild(div);
+        
+        let actionsHtml = '';
         if (role === 'user' || role === 'assistant' || role === 'error') {
             const plainContent = role === 'assistant' ? content.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"') : content;
             const escapedContent = plainContent.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            html += `<button class="message-copy-btn" onclick="copyMessage(this, '${role}')" data-content="${escapedContent}" title="Копировать">📋</button>`;
+            actionsHtml += `<button class="message-copy-btn" onclick="copyMessage(this, '${role}')" data-content="${escapedContent}" title="Копировать">📋</button>`;
         }
         
         if ((role === 'assistant' || role === 'error') && debugData) {
-            html += `<button class="message-debug-btn" onclick="showDebugModal(${escapeHtml(JSON.stringify(debugData)).replace(/"/g, '&quot;')})" title="Debug">🔍</button>`;
+            actionsHtml += `<button class="message-debug-btn" onclick="showDebugModal(${escapeHtml(JSON.stringify(debugData)).replace(/"/g, '&quot;')})" title="Debug">🔍</button>`;
         }
         
-        div.innerHTML = html;
+        if (actionsHtml) {
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'message-actions';
+            actionsDiv.innerHTML = actionsHtml;
+            rowDiv.appendChild(actionsDiv);
+        }
         
-        chatMessages.appendChild(div);
+        chatMessages.appendChild(rowDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 

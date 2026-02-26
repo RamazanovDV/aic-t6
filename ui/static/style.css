@@ -43,12 +43,21 @@ body {
     max-width: 1200px;
     margin: 0 auto;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 1rem;
+    position: relative;
+}
+
+.logo {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
 }
 
 .header-controls {
+    margin-left: auto;
     display: flex;
     gap: 0.5rem;
     align-items: center;
@@ -71,20 +80,33 @@ body {
     background: var(--error);
 }
 
+.session-panel {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+}
+
+.session-panel .panel-label {
+    margin-left: 0.5rem;
+}
+
+.panel-label {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    white-space: nowrap;
+}
+
 .session-select {
     padding: 0.4rem 0.75rem;
-    background: var(--bg-tertiary);
+    background: var(--bg-secondary);
     color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: 6px;
     font-size: 0.875rem;
-    max-width: 200px;
-}
-
-.logo {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--accent);
+    min-width: 150px;
 }
 
 .nav {
@@ -210,8 +232,9 @@ body {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1.5rem;
-    max-width: 90%;
+    padding: 2rem;
+    max-width: 600px;
+    width: 90%;
     max-height: 90vh;
     overflow-y: auto;
 }
@@ -279,7 +302,7 @@ body {
     display: flex;
     flex-direction: column;
     height: calc(100vh - 100px);
-    max-width: 900px;
+    max-width: 1200px;
     margin: 0 auto;
     background: var(--bg-secondary);
     border-radius: 12px;
@@ -295,7 +318,6 @@ body {
 
 .chat-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
     padding: 1rem;
     border-bottom: 1px solid var(--border);
@@ -305,6 +327,13 @@ body {
 
 .chat-header h2 {
     font-size: 1.25rem;
+}
+
+.chat-header-right {
+    margin-left: auto;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
 }
 
 .chat-controls {
@@ -357,7 +386,7 @@ body {
     border: 1px solid var(--border);
     border-radius: 6px;
     font-size: 0.875rem;
-    min-width: 150px;
+    min-width: 250px;
 }
 
 .btn-icon {
@@ -392,24 +421,64 @@ body {
     gap: 1rem;
 }
 
+.chat-input-form {
+    padding: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.input-wrapper {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
+}
+
+.message-input {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: inherit;
+    resize: none;
+    min-height: 44px;
+    max-height: 150px;
+}
+
+.message-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.message-input::placeholder {
+    color: var(--text-secondary);
+}
+
+.input-wrapper .btn-primary {
+    min-height: 44px;
+    padding: 0.75rem 1.5rem;
+}
+
 .message {
     position: relative;
     padding: 1rem 1.5rem;
     margin: 0.5rem 0;
-    border-radius: 12px;
     max-width: 85%;
     word-wrap: break-word;
     overflow-wrap: break-word;
 }
 
-.message-user {
+.message.message-user {
     align-self: flex-end;
     background: var(--message-user);
+    border-radius: 12px;
 }
 
-.message-assistant {
+.message.message-assistant {
     align-self: flex-start;
     background: var(--message-assistant);
+    border-radius: 12px;
 }
 
 .message-system {
@@ -427,51 +496,6 @@ body {
 
 .message-content {
     word-wrap: break-word;
-}
-
-.message-copy-btn {
-    position: absolute;
-    top: 0.5rem;
-    right: 2.5rem;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.25rem 0.5rem;
-    cursor: pointer;
-    font-size: 0.875rem;
-    opacity: 0.6;
-    transition: opacity 0.2s ease;
-}
-
-.message-copy-btn:hover {
-    opacity: 1;
-}
-
-.message-debug-btn {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.25rem 0.5rem;
-    cursor: pointer;
-    font-size: 0.875rem;
-    opacity: 0.6;
-    transition: opacity 0.2s ease;
-}
-
-.message-debug-btn:hover {
-    opacity: 1;
-}
-
-.message-tokens {
-    position: absolute;
-    bottom: 0.25rem;
-    right: 0.5rem;
-    font-size: 0.7rem;
-    color: var(--text-secondary);
-    opacity: 0.7;
 }
 
 .message-content > *:first-child {
@@ -514,142 +538,71 @@ body {
     margin-top: 0.1em;
 }
 
-.chat-input-form {
-    padding: 1rem;
-    border-top: 1px solid var(--border);
-}
-
-.input-wrapper {
+.message-row {
     display: flex;
+    align-items: flex-start;
     gap: 0.5rem;
-    align-items: flex-end;
+    max-width: 85%;
 }
 
-.message-input {
-    flex: 1;
-    padding: 0.75rem 1rem;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 1rem;
-    font-family: inherit;
-    resize: none;
-    min-height: 44px;
-    max-height: 150px;
+.message-row.message-user {
+    margin-left: auto;
 }
 
-.message-input:focus {
-    outline: none;
-    border-color: var(--accent);
+.message-row.message-assistant {
+    margin-right: auto;
 }
 
-.message-input::placeholder {
-    color: var(--text-secondary);
-}
-
-.settings-container {
-    max-width: 800px;
+.message-row.message-system {
     margin: 0 auto;
 }
 
-.settings-container h2 {
-    margin-bottom: 1.5rem;
+.message-row .message {
+    margin: 0;
+    flex: 1;
+    max-width: 100%;
 }
 
-.settings-section {
-    background: var(--bg-secondary);
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-    border: 1px solid var(--border);
-}
-
-.settings-section h3 {
-    margin-bottom: 1rem;
-    font-size: 1.1rem;
-    color: var(--accent);
-}
-
-.form-group {
-    margin-bottom: 1rem;
-}
-
-.form-group:last-child {
-    margin-bottom: 0;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
+.message-tokens {
+    font-size: 0.65rem;
     color: var(--text-secondary);
-    font-size: 0.875rem;
+    opacity: 0.7;
+    margin-top: 0.25rem;
+    text-align: right;
 }
 
-.form-input {
-    width: 100%;
-    padding: 0.75rem;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.9rem;
-}
-
-.form-input:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-.help-text {
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    margin-top: 0.5rem;
-}
-
-.provider-card {
-    background: var(--bg-tertiary);
-    border-radius: 8px;
-    padding: 1rem;
-    margin-bottom: 1rem;
-    border: 1px solid var(--border);
-}
-
-.provider-card h4 {
-    margin-bottom: 0.75rem;
-    color: var(--accent);
-}
-
-.provider-card .form-group {
-    margin-bottom: 0.75rem;
-}
-
-.provider-card .form-group:last-child {
-    margin-bottom: 0;
-}
-
-.context-files {
+.message-actions {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-
-.context-file {
-    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
+    flex-shrink: 0;
+    padding-top: 0.5rem;
+}
+
+.message-copy-btn,
+.message-debug-btn {
     background: var(--bg-tertiary);
-    border-radius: 6px;
-    font-size: 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.15rem 0.35rem;
+    cursor: pointer;
+    font-size: 0.7rem;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+    white-space: nowrap;
 }
 
-.file-icon {
-    font-size: 1rem;
+.message-copy-btn:hover,
+.message-debug-btn:hover {
+    opacity: 1;
 }
 
-.settings-actions {
-    margin-top: 1.5rem;
+.message-tokens {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+    margin-top: 0.25rem;
 }
 
 @media (max-width: 768px) {

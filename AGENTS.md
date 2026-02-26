@@ -31,6 +31,11 @@ t6/
 for dir in backend ui cli; do
   cd $dir && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt && cd ..
 done
+
+# Copy config examples and edit with your API keys
+cp backend/config.example.yaml backend/config.yaml
+cp ui/config.example.yaml ui/config.yaml
+cp cli/config.example.yaml cli/config.yaml
 ```
 
 ### Running
@@ -54,7 +59,10 @@ pytest                          # Run all tests
 pytest path/to/test_file.py    # Run single test file
 pytest -k test_name            # Run tests matching pattern
 pytest -v                      # Verbose output
+pytest --tb=short              # Shorter traceback format
 ```
+
+Tests should be placed in `tests/` directories within each component (e.g., `backend/tests/`, `ui/tests/`).
 
 ### Linting & Formatting
 ```bash
@@ -139,9 +147,16 @@ def chat(message: str): """Send a message""" ...
 {% block content %}{{ content|safe }}{% endblock %}
 ```
 
+### Debug Mode
+The UI includes a debug toggle to view raw LLM requests/responses. Debug data is stored in session files and can be cleared via API or UI.
+
 ### Configuration
 - Store sensitive data in YAML config files (gitignored)
 - Use `.gitignore` to exclude `config.yaml`, `venv/`, `data/`
+
+### Environment Variables
+- `T6_SESSION_ID` - Session ID for CLI (defaults to "cli-default")
+- `T6_BACKEND_URL` - Backend URL override for CLI
 
 ## Common Tasks
 
@@ -156,3 +171,5 @@ llm:
 ```
 
 **Add API Endpoint** - Add route in `backend/app/routes.py`, use `@require_auth` if needed, return JSON.
+
+**Session Management** - Sessions are stored in `data/` directory. Use `session_manager` from `app/session.py` to manage session history.
