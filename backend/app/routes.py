@@ -406,8 +406,8 @@ def list_models(provider_name: str):
         provider = ProviderFactory.create(provider_name, provider_config)
         if hasattr(provider, "list_models"):
             models = provider.list_models()
-            return jsonify({"models": models})
-        return jsonify({"models": [provider.model] if provider.model else []})
+            return jsonify({"models": sorted(models)})
+        return jsonify({"models": sorted([provider.model]) if provider.model else []})
     except ValueError as e:
         return jsonify({"error": f"ValueError: {str(e)}"}), 400
     except Exception as e:

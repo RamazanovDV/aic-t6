@@ -601,7 +601,7 @@ class OllamaProvider(BaseProvider):
             response = requests.get(models_url, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                return [m["name"] for m in data.get("models", [])]
+                return sorted([m["name"] for m in data.get("models", [])])
             return []
         except Exception as e:
             print(f"Error listing models: {e}")
