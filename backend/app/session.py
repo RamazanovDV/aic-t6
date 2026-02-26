@@ -22,8 +22,8 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
-    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None) -> None:
-        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug)
+    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None) -> None:
+        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model)
         self.messages.append(msg)
         if usage:
             self.total_tokens += usage.get("total_tokens", 0)
@@ -82,6 +82,7 @@ class SessionManager:
                         content=m["content"],
                         usage=m.get("usage", {}),
                         debug=m.get("debug"),
+                        model=m.get("model"),
                     )
                     for m in data.get("messages", [])
                 ]

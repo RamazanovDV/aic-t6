@@ -47,6 +47,7 @@ class FileStorage:
                     "content": m.content,
                     "usage": m.usage,
                     "debug": m.debug,
+                    "model": m.model,
                 }
                 for m in session.messages
             ],

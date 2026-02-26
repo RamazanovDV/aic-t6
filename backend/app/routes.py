@@ -88,14 +88,14 @@ def chat():
     try:
         response = provider.chat(session.messages, system_prompt, debug=debug_mode)
     except ContextLengthExceededError as e:
-        session.add_assistant_message(f"[Ошибка] {str(e)}", None, debug=e.debug_response if debug_mode else None)
+        session.add_assistant_message(f"[Ошибка] {str(e)}", None, debug=e.debug_response if debug_mode else None, model=provider.model)
         session_manager.save_session(session_id)
         result = {"error": str(e), "error_type": "context_length_exceeded", "model": provider.model}
         if debug_mode and e.debug_response:
             result["debug"] = {"response": e.debug_response}
         return jsonify(result), 400
     except Exception as e:
-        session.add_assistant_message(f"[Ошибка] {str(e)}", None, None)
+        session.add_assistant_message(f"[Ошибка] {str(e)}", None, None, model=provider.model)
         session_manager.save_session(session_id)
         result = {"error": f"LLM error: {str(e)}", "model": provider.model}
         return jsonify(result), 500
@@ -107,7 +107,7 @@ def chat():
             "response": response.debug_response,
         }
 
-    session.add_assistant_message(response.content, response.usage, debug=debug_info)
+    session.add_assistant_message(response.content, response.usage, debug=debug_info, model=response.model)
     session_manager.save_session(session_id)
 
     result = {
@@ -214,18 +214,18 @@ def chat_stream():
 
             yield f"data: {json.dumps({'content': full_content, 'done': True, 'usage': total_usage, 'debug': {'request': debug_request, 'response': debug_response}})}\n\n"
 
-            session.add_assistant_message(full_content, total_usage)
+            session.add_assistant_message(full_content, total_usage, model=provider.model)
             session_manager.save_session(session_id)
 
         except ContextLengthExceededError as e:
-            session.add_assistant_message(f"[Ошибка] {str(e)}", None, debug=e.debug_response if debug_mode else None)
+            session.add_assistant_message(f"[Ошибка] {str(e)}", None, debug=e.debug_response if debug_mode else None, model=provider.model)
             session_manager.save_session(session_id)
             error_data = {"error": str(e), "error_type": "context_length_exceeded", "content_received": full_content}
             if debug_mode and e.debug_response:
                 error_data["debug"] = {"request": debug_request, "response": e.debug_response}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
         except Exception as e:
-            session.add_assistant_message(f"[Ошибка] {str(e)}", None, None)
+            session.add_assistant_message(f"[Ошибка] {str(e)}", None, None, model=provider.model)
             session_manager.save_session(session_id)
             error_data = {"error": f"LLM error: {str(e)}", "content_received": full_content}
             if debug_mode:

@@ -9,6 +9,7 @@ class Message:
     content: str
     usage: dict[str, int] = field(default_factory=dict)
     debug: dict | None = None
+    model: str | None = None
 
 
 @dataclass
