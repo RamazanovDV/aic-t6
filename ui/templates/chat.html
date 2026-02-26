@@ -253,6 +253,7 @@
         try {
             const response = await fetch(`/api/sessions/${sessionId}/messages`);
             const data = await response.json();
+            console.log('Loaded messages:', data.messages);
             
             chatMessages.innerHTML = '';
             
