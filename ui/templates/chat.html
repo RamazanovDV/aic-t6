@@ -541,9 +541,7 @@
         }
         
         if ((role === 'assistant' || role === 'error') && debugData) {
-            if (debugData.request || debugData.response) {
-                html += `<button class="message-debug-btn" onclick="showDebugModal(${escapeHtml(JSON.stringify(debugData)).replace(/"/g, '&quot;')})" title="Debug">🔍</button>`;
-            }
+            html += `<button class="message-debug-btn" onclick="showDebugModal(${escapeHtml(JSON.stringify(debugData)).replace(/"/g, '&quot;')})" title="Debug">🔍</button>`;
         }
         
         div.innerHTML = html;
