@@ -715,13 +715,22 @@
         }
         
         let tokensHtml = '';
-        if (role === 'assistant') {
+        if (role === 'assistant' || role === 'error') {
             let tokensInfo = '';
             if (usage) {
                 const inTokens = usage.input_tokens || 0;
                 const outTokens = usage.output_tokens || 0;
                 const totalTokens = usage.total_tokens || (inTokens + outTokens);
                 tokensInfo = `вх: ${inTokens} | вых: ${outTokens} | всего: ${totalTokens}`;
+            }
+            if (!model && debugData) {
+                if (debugData.response && debugData.response.model) {
+                    model = debugData.response.model;
+                } else if (debugData.request && debugData.request.model) {
+                    model = debugData.request.model;
+                } else if (debugData.request && debugData.request.body && debugData.request.body.model) {
+                    model = debugData.request.body.model;
+                }
             }
             if (tokensInfo || model) {
                 tokensHtml = `<div class="message-tokens">${model ? model + (tokensInfo ? ' • ' : '') : ''}${tokensInfo}</div>`;
