@@ -188,6 +188,7 @@
                         required
                     ></textarea>
                     <button type="submit" class="btn btn-primary" id="send-btn">Отправить</button>
+                    <button type="button" class="btn btn-note" id="note-btn">Пометка</button>
                 </div>
             </form>
         `;
@@ -195,6 +196,41 @@
         const chatForm = document.getElementById('chat-form');
         const messageInput = document.getElementById('message-input');
         const sendBtn = document.getElementById('send-btn');
+        const noteBtn = document.getElementById('note-btn');
+
+        noteBtn.addEventListener('click', async () => {
+            const message = messageInput.value.trim();
+            if (!message) {
+                messageInput.focus();
+                return;
+            }
+
+            try {
+                const results = await Promise.all(
+                    panels.map(async (panel) => {
+                        const response = await fetch('/api/note', {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'X-Session-Id': panel.sessionId,
+                            },
+                            body: JSON.stringify({ content: message }),
+                        });
+                        if (!response.ok) {
+                            throw new Error('Failed to create note');
+                        }
+                        return response.json();
+                    })
+                );
+
+                panels.forEach((panel, idx) => {
+                    addMessageToPanel(idx, results[idx].content, results[idx].role, null, results[idx].usage, null);
+                });
+                messageInput.value = '';
+            } catch (err) {
+                console.error('Failed to create note:', err);
+            }
+        });
 
         sendBtn.addEventListener('click', function(e) {
             const hasLoading = panels.some(p => p.isLoading);
@@ -453,7 +489,7 @@
             
             panel.messages.forEach(msg => {
                 addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null);
-                if (msg.usage) {
+                if (msg.usage && msg.role !== 'note' && msg.role !== 'info') {
                     panel.totalInput += msg.usage.input_tokens || 0;
                     panel.totalOutput += msg.usage.output_tokens || 0;
                     panel.totalTokens += msg.usage.total_tokens || 0;
@@ -480,12 +516,14 @@
         let contentHtml = '';
         if (role === 'assistant') {
             contentHtml = `<div class="message-content">${marked.parse(content.trim())}</div>`;
+        } else if (role === 'note' || role === 'info') {
+            contentHtml = `<div class="message-content">${escapeHtml(content)}</div>`;
         } else {
             contentHtml = `<div class="message-content">${escapeHtml(content)}</div>`;
         }
         
         let tokensHtml = '';
-        if (role === 'assistant' || role === 'error') {
+        if (role === 'assistant' || role === 'error' || role === 'note') {
             let tokensInfo = '';
             if (usage) {
                 const inTokens = usage.input_tokens || 0;

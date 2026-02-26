@@ -74,6 +74,29 @@ def index():
     return render_template("chat.html")
 
 
+@ui_bp.route("/api/note", methods=["POST"])
+def add_note():
+    data = request.get_json()
+    if not data or "content" not in data:
+        return jsonify({"error": "Missing 'content' field"}), 400
+
+    session_id = get_session_id()
+
+    url = f"{ui_config.backend_url}/note"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "X-Session-Id": session_id,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json()

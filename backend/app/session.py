@@ -15,6 +15,8 @@ class Session:
     provider: str = ""
     model: str = ""
     total_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     user_settings: dict[str, Any] = field(default_factory=dict)
 
     def add_user_message(self, content: str, usage: dict[str, int] | None = None) -> None:
@@ -27,6 +29,8 @@ class Session:
         self.messages.append(msg)
         if usage:
             self.total_tokens += usage.get("total_tokens", 0)
+            self.input_tokens += usage.get("input_tokens", 0)
+            self.output_tokens += usage.get("output_tokens", 0)
         self.updated_at = datetime.now()
 
     def add_error_message(self, content: str, debug: dict | None = None, model: str | None = None) -> None:
@@ -37,6 +41,23 @@ class Session:
     def set_provider_model(self, provider: str, model: str) -> None:
         self.provider = provider
         self.model = model
+
+    def get_current_usage(self) -> dict[str, int]:
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+        }
+
+    def add_note_message(self, content: str, usage: dict[str, int] | None = None) -> None:
+        msg = Message(role="note", content=content, usage=usage or self.get_current_usage())
+        self.messages.append(msg)
+        self.updated_at = datetime.now()
+
+    def add_info_message(self, content: str) -> None:
+        msg = Message(role="info", content=content, usage={})
+        self.messages.append(msg)
+        self.updated_at = datetime.now()
 
     def to_markdown(self) -> str:
         lines = [f"# Session: {self.session_id}", f"Created: {self.created_at.isoformat()}", ""]
@@ -59,6 +80,8 @@ class Session:
     def clear(self) -> None:
         self.messages = []
         self.total_tokens = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
         self.updated_at = datetime.now()
 
     def clear_debug(self) -> None:
@@ -99,6 +122,8 @@ class SessionManager:
                     provider=data.get("provider", ""),
                     model=data.get("model", ""),
                     total_tokens=data.get("total_tokens", 0),
+                    input_tokens=data.get("input_tokens", 0),
+                    output_tokens=data.get("output_tokens", 0),
                     user_settings=data.get("user_settings", {}),
                 )
                 self._sessions[session_id] = session
@@ -164,6 +189,8 @@ class SessionManager:
                 provider=data.get("provider", ""),
                 model=data.get("model", ""),
                 total_tokens=data.get("total_tokens", 0),
+                input_tokens=data.get("input_tokens", 0),
+                output_tokens=data.get("output_tokens", 0),
                 user_settings=data.get("user_settings", {}),
             )
             self._sessions[session_id] = session

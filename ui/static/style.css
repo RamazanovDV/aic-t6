@@ -13,6 +13,8 @@
     --message-assistant: #1e3a5f;
     --message-system: #1a2a3a;
     --message-error: #3a1a1a;
+    --message-note: #3d3520;
+    --message-info: #3d2a1a;
 }
 
 html, body {
@@ -244,6 +246,15 @@ body {
 
 .btn-secondary:hover {
     background: var(--border);
+}
+
+.btn-note {
+    background: #f0c020;
+    color: #333;
+}
+
+.btn-note:hover {
+    background: #d4a818;
 }
 
 .modal {
@@ -583,6 +594,20 @@ body {
     align-self: center;
     background: var(--message-error);
     color: var(--error);
+    border-radius: 12px;
+}
+
+.message.message-note {
+    align-self: center;
+    background: var(--message-note);
+    color: #f0c020;
+    border-radius: 12px;
+}
+
+.message.message-info {
+    align-self: center;
+    background: var(--message-info);
+    color: #e07020;
     border-radius: 12px;
 }
 

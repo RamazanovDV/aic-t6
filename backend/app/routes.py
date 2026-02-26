@@ -41,6 +41,29 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@api_bp.route("/note", methods=["POST"])
+@require_auth
+def add_note():
+    data = request.get_json()
+    if not data or "content" not in data:
+        return jsonify({"error": "Missing 'content' field"}), 400
+
+    content = data["content"]
+    session_id = get_session_id()
+    session = session_manager.get_session(session_id)
+
+    current_usage = session.get_current_usage()
+    session.add_note_message(content, current_usage)
+    session_manager.save_session(session_id)
+
+    last_msg = session.messages[-1]
+    return jsonify({
+        "role": last_msg.role,
+        "content": last_msg.content,
+        "usage": last_msg.usage,
+    })
+
+
 @api_bp.route("/chat", methods=["POST"])
 @require_auth
 def chat():

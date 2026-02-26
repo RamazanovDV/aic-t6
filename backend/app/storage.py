@@ -23,8 +23,14 @@ class FileStorage:
 
     def _get_index(self) -> dict:
         index_file = self.sessions_dir / "index.json"
-        with open(index_file, "r") as f:
-            return json.load(f)
+        try:
+            with open(index_file, "r") as f:
+                data = f.read()
+                if not data.strip():
+                    return {"sessions": [], "last_modified": datetime.now().isoformat()}
+                return json.loads(data)
+        except (json.JSONDecodeError, FileNotFoundError):
+            return {"sessions": [], "last_modified": datetime.now().isoformat()}
 
     def _save_index(self, index: dict) -> None:
         index["last_modified"] = datetime.now().isoformat()
@@ -56,6 +62,8 @@ class FileStorage:
             "provider": session.provider,
             "model": session.model,
             "total_tokens": session.total_tokens,
+            "input_tokens": session.input_tokens,
+            "output_tokens": session.output_tokens,
             "user_settings": session.user_settings,
         }
 
