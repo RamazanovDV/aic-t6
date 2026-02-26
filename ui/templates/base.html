@@ -20,17 +20,17 @@
                 </select>
                 <button class="btn btn-small" onclick="createNewSession()" title="Новая сессия">+</button>
                 <button class="btn btn-small" onclick="renameCurrentSession()" title="Переименовать">✎</button>
+                <button class="btn btn-small" onclick="openSettings()" title="Настройки">⚙️</button>
                 <span id="status" class="status-dot" title="Проверка..."></span>
             </div>
-            <nav class="nav">
-                <a href="/" class="nav-link">Чат</a>
-                <a href="/settings" class="nav-link">Настройки</a>
-                <a href="/admin" class="nav-link">Админка</a>
-            </nav>
         </div>
     </header>
 
     <script>
+        function openSettings() {
+            window.location.href = '/?settings=1';
+        }
+
         document.addEventListener('click', function(e) {
             if (typeof isRequestInProgress !== 'undefined' && isRequestInProgress) {
                 const link = e.target.closest('.nav-link');

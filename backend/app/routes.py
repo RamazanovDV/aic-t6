@@ -1,7 +1,7 @@
 import json
 
 import requests
-from flask import Blueprint, jsonify, request, Response
+from flask import Blueprint, jsonify, render_template, request, Response
 
 from app.config import config
 from app.context import get_system_prompt
@@ -11,6 +11,11 @@ from app.session import session_manager
 
 api_bp = Blueprint("api", __name__)
 admin_bp = Blueprint("admin", __name__)
+
+
+@admin_bp.route("/")
+def admin_page():
+    return render_template("admin.html")
 
 
 def require_auth(f):
@@ -341,11 +346,16 @@ def import_session():
 @admin_bp.route("/config", methods=["GET"])
 @require_auth
 def get_config():
+    default_models = {}
+    for name, cfg in config.providers.items():
+        if "default_model" in cfg:
+            default_models[name] = cfg["default_model"]
+    
     return jsonify({
         "api_key": config.api_key,
         "default_provider": config.default_provider,
         "providers": config.providers,
-        "default_models": config.llm.get("default_models", {}),
+        "default_models": default_models,
     })
 
 
@@ -360,11 +370,9 @@ def save_config():
         if "api_key" in data:
             config._config["auth"]["api_key"] = data["api_key"]
         if "default_provider" in data:
-            config._config["llm"]["default_provider"] = data["default_provider"]
+            config._config["default_provider"] = data["default_provider"]
         if "providers" in data:
-            config._config["llm"]["providers"] = data["providers"]
-        if "default_models" in data:
-            config._config["llm"]["default_models"] = data["default_models"]
+            config._config["providers"] = data["providers"]
         
         config.save()
         return jsonify({"status": "saved"})

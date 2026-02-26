@@ -67,6 +67,28 @@
     </div>
 </div>
 
+<div id="settings-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3>Настройки</h3>
+        
+        <div class="settings-section">
+            <h4>Сессии</h4>
+            <div class="sessions-list" id="settings-sessions-list">
+                <div class="loading">Загрузка...</div>
+            </div>
+            <div style="margin-top: 0.5rem;">
+                <button class="btn btn-small btn-secondary" onclick="exportSessions()">Экспорт</button>
+                <button class="btn btn-small btn-secondary" onclick="document.getElementById('settings-import-file').click()">Импорт</button>
+                <input type="file" id="settings-import-file" accept=".json" style="display: none" onchange="importSessions(this)">
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeSettingsModal()">Закрыть</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const chatMessages = document.getElementById('chat-messages');
     const chatForm = document.getElementById('chat-form');
@@ -90,7 +112,136 @@
 
     document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('debug-toggle').checked = debugMode;
+        
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('settings') === '1') {
+            openSettingsModal();
+            window.history.replaceState({}, document.title, '/');
+        }
     });
+
+    function openSettingsModal() {
+        loadSessionsList();
+        document.getElementById('settings-modal').style.display = 'flex';
+    }
+
+    function closeSettingsModal() {
+        document.getElementById('settings-modal').style.display = 'none';
+    }
+
+    async function loadSessionsList() {
+        const container = document.getElementById('settings-sessions-list');
+        try {
+            const response = await fetch('/api/sessions');
+            const data = await response.json();
+            
+            if (!data.sessions || data.sessions.length === 0) {
+                container.innerHTML = '<p class="help-text">Нет сессий</p>';
+                return;
+            }
+
+            let html = '<div style="max-height: 200px; overflow-y: auto;">';
+            data.sessions.forEach(session => {
+                const date = session.updated_at ? new Date(session.updated_at).toLocaleString('ru') : 'N/A';
+                html += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; border-bottom: 1px solid var(--border);">
+                        <div>
+                            <div style="font-weight: 500;">${session.session_id}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">${session.message_count} сообщений</div>
+                        </div>
+                        <div>
+                            ${session.session_id !== 'default' ? `<button class="btn btn-small" onclick="renameSessionSettings('${session.session_id}')">✎</button>
+                            <button class="btn btn-small btn-danger" onclick="deleteSessionSettings('${session.session_id}')">✕</button>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = '<p class="help-text">Ошибка загрузки</p>';
+        }
+    }
+
+    async function deleteSessionSettings(sessionId) {
+        if (!confirm(`Удалить сессию "${sessionId}"?`)) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadSessionsList();
+            } else {
+                alert('Ошибка удаления');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function renameSessionSettings(sessionId) {
+        const newName = prompt('Новое имя:', sessionId);
+        if (!newName || newName === sessionId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_name: newName })
+            });
+            
+            if (response.ok) {
+                loadSessionsList();
+            } else {
+                alert('Ошибка переименования');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function exportSessions() {
+        try {
+            const response = await fetch('/api/sessions/export', { method: 'POST' });
+            const data = await response.json();
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 't6-sessions.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function importSessions(input) {
+        const file = input.files[0];
+        if (!file) return;
+        
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            
+            const response = await fetch('/api/sessions/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            if (response.ok) {
+                alert('Импортировано');
+                loadSessionsList();
+            } else {
+                alert('Ошибка импорта');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+        
+        input.value = '';
+    }
 
     function toggleDebug() {
         debugMode = document.getElementById('debug-toggle').checked;

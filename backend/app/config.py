@@ -60,23 +60,22 @@ class Config:
         return self.auth.get("api_key", "")
 
     @property
-    def llm(self) -> dict[str, Any]:
-        return self._config.get("llm", {})
-
-    @property
     def default_provider(self) -> str:
-        return self.llm.get("default_provider", "openai")
+        return self._config.get("default_provider", "openai")
 
     @property
     def timeout(self) -> int:
-        return self.llm.get("timeout", 120)
+        return self._config.get("timeout", 120)
 
     @property
     def providers(self) -> dict[str, dict[str, Any]]:
-        return self.llm.get("providers", {})
+        return self._config.get("providers", {})
 
     def get_provider_config(self, name: str) -> dict[str, Any]:
-        return self.providers.get(name, {})
+        provider = self.providers.get(name, {}).copy()
+        if "default_model" not in provider:
+            provider["default_model"] = self.get_default_model(name)
+        return provider
 
     @property
     def storage(self) -> dict[str, Any]:
@@ -106,13 +105,7 @@ class Config:
         filepath.write_text(content, encoding="utf-8")
 
     def get_default_model(self, provider: str) -> str:
-        return self.llm.get("default_models", {}).get(provider, "")
-
-    def set_default_model(self, provider: str, model: str) -> None:
-        if "default_models" not in self._config.get("llm", {}):
-            self._config.setdefault("llm", {})["default_models"] = {}
-        self._config["llm"]["default_models"][provider] = model
-        self.save()
+        return self.providers.get(provider, {}).get("default_model", "")
 
     @property
     def context_config(self) -> dict[str, Any]:

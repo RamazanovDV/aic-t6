@@ -2,12 +2,10 @@
 
 {% block content %}
 <div class="admin-container">
-    <h2>Админ-панель</h2>
-
     <div class="admin-tabs">
-        <button class="tab-btn active" data-tab="auth">Аутентификация</button>
-        <button class="tab-btn" data-tab="providers">Провайдеры</button>
-        <button class="tab-btn" data-tab="context">Контекст</button>
+        <button class="tab-btn active" data-tab="auth" onclick="switchTab('auth')">Аутентификация</button>
+        <button class="tab-btn" data-tab="providers" onclick="switchTab('providers')">Провайдеры</button>
+        <button class="tab-btn" data-tab="context" onclick="switchTab('context')">Контекст</button>
     </div>
 
     <div class="tab-content active" id="tab-auth">
@@ -143,40 +141,79 @@
 
 <script>
     let config = {};
-    let defaultModels = {};
     let contextFiles = [];
     let enabledContextFiles = [];
+    let apiKey = '';
 
     document.addEventListener('DOMContentLoaded', function() {
         initTabs();
-        loadConfig();
+        
+        // Load API key from localStorage or prompt
+        apiKey = localStorage.getItem('t6_admin_api_key') || '';
+        if (!apiKey) {
+            apiKey = prompt('Введите API Key администратора:') || '';
+            if (apiKey) localStorage.setItem('t6_admin_api_key', apiKey);
+        }
+        
+        if (apiKey) {
+            loadConfig();
+        }
     });
 
+    function updateApiKey() {
+        const newKey = prompt('Введите API Key:', apiKey);
+        if (newKey !== null) {
+            apiKey = newKey;
+            localStorage.setItem('t6_admin_api_key', apiKey);
+            loadConfig();
+        }
+    }
+
+    function getAuthHeaders() {
+        return { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
+    }
+
     function initTabs() {
+        // Keep event listeners as before
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                
-                btn.classList.add('active');
-                document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+                switchTab(btn.dataset.tab);
             });
         });
     }
 
+    function switchTab(tabName) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        
+        document.querySelector(`.tab-btn[data-tab="${tabName}"]`).classList.add('active');
+        document.getElementById('tab-' + tabName).classList.add('active');
+    }
+
     async function loadConfig() {
+        if (!apiKey) {
+            updateApiKey();
+            return;
+        }
+        
         try {
-            const response = await fetch('/api/admin/config');
+            const response = await fetch('/admin/config', { headers: getAuthHeaders() });
+            if (response.status === 401) {
+                alert('Неверный API Key');
+                updateApiKey();
+                return;
+            }
             config = await response.json();
-            
-            document.getElementById('admin-api-key').value = config.api_key || '';
-            defaultModels = config.default_models || {};
-            
-            renderProviders();
-            loadContextFileList();
         } catch (e) {
             console.error('Failed to load config:', e);
+            alert('Ошибка загрузки конфигурации');
         }
+        
+        // Always render UI even if config loading failed
+        document.getElementById('admin-api-key').value = localStorage.getItem('t6_admin_api_key') || '';
+        
+        renderProviders();
+        loadContextFileList();
     }
 
     function renderProviders() {
@@ -197,7 +234,7 @@
                     <div class="provider-info">
                         <div><strong>Тип:</strong> ${cfg.type || 'openai'}</div>
                         <div><strong>URL:</strong> ${cfg.url || '-'}</div>
-                        <div><strong>Модель по умолчанию:</strong> ${defaultModels[name] || '-'}</div>
+                        <div><strong>Модель по умолчанию:</strong> ${cfg.default_model || '-'}</div>
                     </div>
                     <div class="provider-actions">
                         <button class="btn btn-small" onclick="editProvider('${name}')">Редактировать</button>
@@ -213,9 +250,9 @@
 
     async function setDefaultProvider(name) {
         try {
-            const response = await fetch('/api/admin/config', {
+            const response = await fetch('/admin/config', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ default_provider: name })
             });
             
@@ -233,9 +270,9 @@
         const apiKey = document.getElementById('admin-api-key').value;
         
         try {
-            const response = await fetch('/api/admin/config', {
+            const response = await fetch('/admin/config', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ api_key: apiKey })
             });
             
@@ -272,7 +309,7 @@
         document.getElementById('provider-type').value = provider.type || 'openai';
         document.getElementById('provider-url').value = provider.url || '';
         document.getElementById('provider-api-key').value = provider.api_key || '';
-        document.getElementById('provider-default-model').value = defaultModels[name] || '';
+        document.getElementById('provider-default-model').value = provider.default_model || '';
         document.getElementById('provider-timeout').value = provider.timeout || '';
         document.getElementById('btn-delete-provider').style.display = 'inline-block';
         document.getElementById('provider-name').disabled = true;
@@ -319,26 +356,19 @@
             type: type,
             url: url,
             api_key: apiKey,
+            default_model: defaultModel,
         };
 
         if (timeout) {
             providers[name].timeout = parseInt(timeout, 10);
         }
 
-        const newDefaultModels = { ...defaultModels };
-        if (defaultModel) {
-            newDefaultModels[name] = defaultModel;
-        } else {
-            delete newDefaultModels[name];
-        }
-
         try {
-            const response = await fetch('/api/admin/config', {
+            const response = await fetch('/admin/config', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({
                     providers: providers,
-                    default_models: newDefaultModels
                 })
             });
             
@@ -359,17 +389,13 @@
         
         const providers = { ...config.providers };
         delete providers[name];
-        
-        const newDefaultModels = { ...defaultModels };
-        delete newDefaultModels[name];
 
         try {
-            const response = await fetch('/api/admin/config', {
+            const response = await fetch('/admin/config', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({
                     providers: providers,
-                    default_models: newDefaultModels
                 })
             });
             
@@ -386,17 +412,17 @@
 
     async function validateProvider(name) {
         const provider = config.providers[name];
-        const model = defaultModels[name] || '';
+        const model = provider.default_model || '';
         
         try {
-            const response = await fetch('/api/admin/config/validate', {
+            const response = await fetch('/admin/config/validate', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({
                     provider: name,
                     config: {
                         ...provider,
-                        model: model
+                        model: model || provider.default_model,
                     }
                 })
             });
@@ -415,7 +441,7 @@
 
     async function loadContextFileList() {
         try {
-            const response = await fetch('/api/admin/context');
+            const response = await fetch('/admin/context', { headers: getAuthHeaders() });
             const data = await response.json();
             
             contextFiles = data.files || [];
@@ -470,9 +496,9 @@
         const enabled = Array.from(checkboxes).map(cb => cb.dataset.filename);
         
         try {
-            const response = await fetch('/api/admin/context/enabled', {
+            const response = await fetch('/admin/context/enabled', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ enabled_files: enabled })
             });
             
@@ -512,9 +538,9 @@
         }
         
         try {
-            const response = await fetch('/api/admin/context', {
+            const response = await fetch('/admin/context', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ filename, content })
             });
             
@@ -535,8 +561,9 @@
         if (!confirm(`Удалить файл "${filename}"?`)) return;
         
         try {
-            const response = await fetch(`/api/admin/context/${encodeURIComponent(filename)}`, {
-                method: 'DELETE'
+            const response = await fetch(`/admin/context/${encodeURIComponent(filename)}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
             });
             
             if (response.ok) {
@@ -561,9 +588,9 @@
         }
         
         try {
-            const response = await fetch(`/api/admin/context/${encodeURIComponent(filename)}/rename`, {
+            const response = await fetch(`/admin/context/${encodeURIComponent(filename)}/rename`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ new_name: newName })
             });
             
@@ -587,7 +614,7 @@
         }
         
         try {
-            const response = await fetch(`/api/admin/context/${encodeURIComponent(filename)}`);
+            const response = await fetch(`/admin/context/${encodeURIComponent(filename)}`, { headers: getAuthHeaders() });
             const data = await response.json();
             
             if (response.ok) {
@@ -610,9 +637,9 @@
         }
         
         try {
-            const response = await fetch(`/api/admin/context/${encodeURIComponent(filename)}`, {
+            const response = await fetch(`/admin/context/${encodeURIComponent(filename)}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ content: content })
             });
             

@@ -74,16 +74,6 @@ def index():
     return render_template("chat.html")
 
 
-@ui_bp.route("/settings")
-def settings():
-    return render_template("settings.html")
-
-
-@ui_bp.route("/admin")
-def admin():
-    return render_template("admin.html")
-
-
 @ui_bp.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json()

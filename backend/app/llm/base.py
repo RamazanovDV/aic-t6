@@ -88,7 +88,10 @@ class ProviderFactory:
         if not url:
             url = default_urls.get(provider_type, "")
         
-        if url and "/chat/completions" not in url and "/messages" not in url and provider_type != "ollama":
+        if provider_type == "ollama":
+            if "/api/chat" not in url:
+                url = url.rstrip("/") + "/api/chat"
+        elif "/chat/completions" not in url and "/messages" not in url:
             url = url.rstrip("/") + "/chat/completions"
 
         return provider_class(

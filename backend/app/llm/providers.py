@@ -103,11 +103,10 @@ class GenericOpenAIProvider(BaseProvider):
                 base_url = base_url.split("/chat/completions")[0]
             elif "/messages" in base_url:
                 base_url = base_url.split("/messages")[0]
-            elif base_url.endswith("/v1"):
-                base_url = base_url[:-3]
             
             base_url = base_url.rstrip("/")
             models_url = f"{base_url}/models"
+            
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -491,8 +490,11 @@ class OllamaProvider(BaseProvider):
             raise
 
         data = response.json()
-        print(f"DEBUG GenericOpenAIProvider: response keys = {list(data.keys())}")
-        content = data["choices"][0]["message"]["content"]
+        
+        if "message" in data and "content" in data["message"]:
+            content = data["message"]["content"]
+        else:
+            content = data.get("content", "") or data.get("message", {}).get("content", "")
         
         usage = {}
         if "usage" in data:
@@ -500,6 +502,12 @@ class OllamaProvider(BaseProvider):
                 "input_tokens": data["usage"].get("prompt_tokens", 0),
                 "output_tokens": data["usage"].get("completion_tokens", 0),
                 "total_tokens": data["usage"].get("total_tokens", 0),
+            }
+        elif "prompt_eval_count" in data:
+            usage = {
+                "input_tokens": data.get("prompt_eval_count", 0),
+                "output_tokens": data.get("eval_count", 0),
+                "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
             }
         elif content:
             usage = estimate_tokens(content)
@@ -574,17 +582,24 @@ class OllamaProvider(BaseProvider):
                         break
                     try:
                         data = json.loads(data_str)
-                        delta = data.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            full_content += content
-                            yield LLMChunk(content=full_content, is_final=False)
+                        
+                        if "message" in data and "content" in data["message"]:
+                            delta = data["message"].get("content", "")
+                            if delta:
+                                full_content += delta
+                                yield LLMChunk(content=full_content, is_final=False)
+                        elif "choices" in data:
+                            delta = data.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                full_content += content
+                                yield LLMChunk(content=full_content, is_final=False)
 
-                        if "usage" in data:
+                        if "eval_count" in data:
                             total_usage = {
-                                "input_tokens": data["usage"].get("prompt_tokens", 0),
-                                "output_tokens": data["usage"].get("completion_tokens", 0),
-                                "total_tokens": data["usage"].get("total_tokens", 0),
+                                "input_tokens": data.get("prompt_eval_count", 0),
+                                "output_tokens": data.get("eval_count", 0),
+                                "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
                             }
                     except json.JSONDecodeError:
                         continue
@@ -596,7 +611,7 @@ class OllamaProvider(BaseProvider):
 
     def list_models(self) -> list[str]:
         try:
-            base_url = self.url.split("/v1")[0] if "/v1" in self.url else self.url
+            base_url = self.url.split("/api/chat")[0] if "/api/chat" in self.url else self.url
             models_url = f"{base_url}/api/tags"
             response = requests.get(models_url, timeout=10)
             if response.status_code == 200:
