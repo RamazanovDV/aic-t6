@@ -318,7 +318,13 @@ def get_summarization_settings(session_id: str):
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 404:
-            return jsonify({"summarization_enabled": False, "summarize_after_n": 10, "default_interval": 10})
+            return jsonify({
+                "summarization_enabled": False,
+                "summarize_after_n": 10,
+                "summarize_after_minutes": 0,
+                "summarize_context_percent": 0,
+                "default_interval": 10
+            })
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -339,6 +345,21 @@ def set_summarization_settings(session_id: str):
 
     try:
         response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/summarize", methods=["POST"])
+def manual_summarize(session_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/summarize"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, timeout=120)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:

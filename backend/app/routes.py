@@ -109,7 +109,8 @@ def chat():
     current_count = session.get_active_message_count()
     session.add_user_message(user_message)
 
-    if summarizer.should_summarize(session, current_count):
+    should_summarize_result, summarize_reason = summarizer.should_summarize(session, current_count)
+    if should_summarize_result:
         messages_to_summarize = session.get_messages_before_last_user()
         if messages_to_summarize:
             summary_content, debug_info = summarizer.summarize_messages(
@@ -213,7 +214,7 @@ def chat_stream():
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
 
-    needs_summarization = summarizer.should_summarize(session, 0)
+    needs_summarization, summarize_reason = summarizer.should_summarize(session, 0)
 
     def generate():
         nonlocal needs_summarization
@@ -303,8 +304,6 @@ def chat_stream():
                     formatted_messages[0]["content"] = f"{formatted_messages[0]['content']}\n\n{summary_text}"
                 else:
                     formatted_messages.insert(0, {"role": "system", "content": summary_text})
-
-        print(f"[DEBUG] formatted_messages: {[(m['role'], m['content'][:30]) for m in formatted_messages]}")
 
         full_content = ""
         total_usage = {}
@@ -480,10 +479,14 @@ def get_summarization_settings(session_id: str):
 
     enabled = session.user_settings.get("summarization_enabled", False)
     interval = session.user_settings.get("summarize_after_n", config.default_messages_interval)
+    minutes = session.user_settings.get("summarize_after_minutes", 0)
+    context_percent = session.user_settings.get("summarize_context_percent", 0)
 
     return jsonify({
         "summarization_enabled": enabled,
         "summarize_after_n": interval,
+        "summarize_after_minutes": minutes,
+        "summarize_context_percent": context_percent,
         "default_interval": config.default_messages_interval,
     })
 
@@ -510,9 +513,61 @@ def set_summarization_settings(session_id: str):
             interval = 100
         session.user_settings["summarize_after_n"] = interval
 
+    if "summarize_after_minutes" in data:
+        minutes = int(data["summarize_after_minutes"])
+        if minutes < 0:
+            minutes = 0
+        if minutes > 10080:  # 1 week
+            minutes = 10080
+        session.user_settings["summarize_after_minutes"] = minutes
+
+    if "summarize_context_percent" in data:
+        percent = int(data["summarize_context_percent"])
+        if percent < 0:
+            percent = 0
+        if percent > 100:
+            percent = 100
+        session.user_settings["summarize_context_percent"] = percent
+
     session_manager.save_session(session_id)
 
     return jsonify({"status": "saved"})
+
+
+@api_bp.route("/sessions/<session_id>/summarize", methods=["POST"])
+@require_auth
+def manual_summarize(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    messages_to_summarize = session.get_messages_before_last_user()
+    if not messages_to_summarize:
+        return jsonify({"error": "No messages to summarize", "has_summary": len([m for m in session.messages if m.role == "summary"]) > 0}), 400
+
+    debug_mode = request.args.get("debug", "false").lower() == "true"
+    summary_content, debug_info = summarizer.summarize_messages(
+        messages_to_summarize,
+        debug=debug_mode,
+    )
+
+    summarized_indices = list(range(len(messages_to_summarize)))
+    session.add_summary_message(
+        content=summary_content,
+        summarized_indices=summarized_indices,
+        usage={},
+        debug=debug_info if debug_mode else None,
+        model=config.summarizer_model,
+    )
+
+    session_manager.save_session(session_id)
+
+    return jsonify({
+        "status": "summarized",
+        "summary": summary_content,
+        "summarized_count": len(messages_to_summarize),
+        "debug": debug_info if debug_mode else None,
+    })
 
 
 @api_bp.route("/sessions/export", methods=["POST"])
@@ -613,28 +668,60 @@ def validate_provider():
 
 @admin_bp.route("/providers/<provider_name>/models", methods=["GET"])
 @require_auth
-def list_models(provider_name: str):
-    provider_config = config.get_provider_config(provider_name)
-    if not provider_config:
-        return jsonify({"error": f"Provider '{provider_name}' not found in config", "available": list(config.providers.keys())}), 400
+def list_provider_models_from_catalog(provider_name: str):
+    """Список доступных моделей для конкретного провайдера из справочника"""
+    models = config.models
+    provider_models = {
+        name: info for name, info in models.items() 
+        if info.get("enabled", True) and (info.get("provider") == provider_name or info.get("provider") == "*")
+    }
+    return jsonify({"models": sorted(provider_models.keys())})
 
-    provider_config = provider_config.copy()
-    default_model = config.get_default_model(provider_name)
-    if default_model:
-        provider_config["model"] = default_model
-    elif "model" not in provider_config:
-        provider_config["model"] = "gpt-4o-mini"
 
-    try:
-        provider = ProviderFactory.create(provider_name, provider_config)
-        if hasattr(provider, "list_models"):
-            models = provider.list_models()
-            return jsonify({"models": sorted(models)})
-        return jsonify({"models": sorted([provider.model]) if provider.model else []})
-    except ValueError as e:
-        return jsonify({"error": f"ValueError: {str(e)}"}), 400
-    except Exception as e:
-        return jsonify({"error": f"Error: {str(e)}", "type": type(e).__name__}), 500
+@admin_bp.route("/models/fetch", methods=["POST"])
+@require_auth
+def fetch_models_from_providers():
+    """Загрузить модели от всех настроенных провайдеров"""
+    results = {}
+    providers = config.providers
+    
+    for provider_name, provider_cfg in providers.items():
+        try:
+            provider_cfg = provider_cfg.copy()
+            if "default_model" not in provider_cfg:
+                provider_cfg["default_model"] = config.get_default_model(provider_name)
+            
+            provider = ProviderFactory.create(provider_name, provider_cfg)
+            if hasattr(provider, "list_models"):
+                models = provider.list_models()
+                results[provider_name] = {
+                    "status": "ok",
+                    "count": len(models),
+                    "models": models,
+                }
+                
+                for model_name in models:
+                    existing = config.get_model_info(model_name)
+                    if not existing:
+                        config.set_model_info(model_name, {
+                            "provider": provider_name,
+                            "context_window": 128000,
+                            "input_price": 0,
+                            "output_price": 0,
+                            "cache_read_price": 0,
+                            "cache_write_price": 0,
+                            "enabled": True,
+                        })
+            else:
+                results[provider_name] = {"status": "not_supported", "count": 0}
+        except Exception as e:
+            results[provider_name] = {"status": "error", "error": str(e)}
+    
+    return jsonify({
+        "status": "completed",
+        "results": results,
+        "models": config.models,
+    })
 
 
 @admin_bp.route("/context", methods=["GET"])
@@ -740,3 +827,53 @@ def rename_context_file(filename: str):
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+@admin_bp.route("/models", methods=["GET"])
+@require_auth
+def list_model_catalog():
+    models = config.models
+    return jsonify({"models": models})
+
+
+@admin_bp.route("/models/available", methods=["GET"])
+@require_auth
+def list_available_models():
+    """Список доступных (включённых) моделей для выбора"""
+    models = config.models
+    available = {name: info for name, info in models.items() if info.get("enabled", True)}
+    return jsonify({"models": available})
+
+
+@admin_bp.route("/models", methods=["POST"])
+@require_auth
+def add_or_update_model():
+    data = request.get_json()
+    if not data or "name" not in data:
+        return jsonify({"error": "Missing model name"}), 400
+
+    model_name = data["name"].strip()
+    if not model_name:
+        return jsonify({"error": "Model name cannot be empty"}), 400
+
+    info = {
+        "provider": data.get("provider", "*"),
+        "context_window": data.get("context_window", 128000),
+        "input_price": data.get("input_price", 0.0),
+        "output_price": data.get("output_price", 0.0),
+        "cache_read_price": data.get("cache_read_price", 0.0),
+        "cache_write_price": data.get("cache_write_price", 0.0),
+        "enabled": data.get("enabled", True),
+    }
+
+    config.set_model_info(model_name, info)
+    return jsonify({"status": "saved", "model": model_name, "info": info})
+
+
+@admin_bp.route("/models/<model_name>", methods=["DELETE"])
+@require_auth
+def delete_model(model_name: str):
+    if config.delete_model(model_name):
+        return jsonify({"status": "deleted", "model": model_name})
+    return jsonify({"error": "Cannot delete default model or model not found"}), 400

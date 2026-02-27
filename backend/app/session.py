@@ -153,6 +153,54 @@ class Session:
     def get_summarizable_messages(self) -> list[Message]:
         return [m for m in self.messages if m.role in ("user", "assistant")]
 
+    def get_oldest_message_age_minutes(self) -> int:
+        """Возраст самого старого сообщения в минутах (после последнего summary)"""
+        last_summary_idx = None
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].role == "summary":
+                last_summary_idx = i
+                break
+
+        messages_to_check = self.messages[last_summary_idx + 1:] if last_summary_idx else self.messages
+        active_msgs = [m for m in messages_to_check if m.role in ("user", "assistant", "summary")]
+
+        if not active_msgs:
+            return 0
+
+        oldest = min(active_msgs, key=lambda m: m.created_at)
+        now = datetime.now()
+        delta = now - oldest.created_at
+        return int(delta.total_seconds() / 60)
+
+    def get_context_tokens_estimate(self, model: str | None = None) -> int:
+        """Оценка количества токенов в контексте (после последнего summary)"""
+        from app.config import config
+
+        last_summary_idx = None
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].role == "summary":
+                last_summary_idx = i
+                break
+
+        messages_to_check = self.messages[last_summary_idx + 1:] if last_summary_idx else self.messages
+
+        total_chars = sum(len(m.content) for m in messages_to_check if m.role in ("user", "assistant", "system", "summary"))
+        chars_per_token = 4
+        return total_chars // chars_per_token
+
+    def get_context_usage_percent(self, model: str | None = None) -> float:
+        """Процент использования контекстного окна"""
+        from app.config import config
+
+        target_model = model or self.model or config.summarizer_model
+        context_window = config.get_context_window(target_model)
+        tokens = self.get_context_tokens_estimate(target_model)
+
+        if context_window == 0:
+            return 0.0
+
+        return (tokens / context_window) * 100
+
     def to_markdown(self) -> str:
         lines = [f"# Session: {self.session_id}", f"Created: {self.created_at.isoformat()}", ""]
         
@@ -206,6 +254,7 @@ class SessionManager:
                         debug=m.get("debug"),
                         model=m.get("model"),
                         summary_of=m.get("summary_of"),
+                        created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
                     )
                     for m in data.get("messages", [])
                 ]
@@ -275,6 +324,7 @@ class SessionManager:
                     debug=m.get("debug"),
                     model=m.get("model"),
                     summary_of=m.get("summary_of"),
+                    created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
                 )
                 for m in data.get("messages", [])
             ]

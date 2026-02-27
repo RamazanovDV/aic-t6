@@ -7,6 +7,7 @@
         <button class="tab-btn" data-tab="providers" onclick="switchTab('providers')">Провайдеры</button>
         <button class="tab-btn" data-tab="context" onclick="switchTab('context')">Контекст</button>
         <button class="tab-btn" data-tab="summarization" onclick="switchTab('summarization')">Суммаризация</button>
+        <button class="tab-btn" data-tab="models" onclick="switchTab('models')">Модели</button>
     </div>
 
     <div class="tab-content active" id="tab-auth">
@@ -108,6 +109,23 @@
             </div>
         </div>
     </div>
+
+    <div class="tab-content" id="tab-models">
+        <div class="settings-section">
+            <h3>Справочник моделей</h3>
+            <p class="help-text">Справочник содержит информацию о моделях: размер контекстного окна и цены за токены.</p>
+            
+            <div class="models-actions" style="margin-bottom: 1rem;">
+                <button class="btn btn-primary" onclick="showAddModel()">Добавить</button>
+                <button class="btn btn-secondary" onclick="fetchModelsFromProviders()">Загрузить от провайдеров</button>
+                <span id="fetch-models-status" style="margin-left: 10px; color: var(--text-secondary);"></span>
+            </div>
+            
+            <div id="models-list" class="models-grid">
+                <div class="loading">Загрузка моделей...</div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div id="provider-modal" class="modal" style="display: none;">
@@ -141,7 +159,9 @@
         
         <div class="form-group">
             <label for="provider-default-model">Модель по умолчанию</label>
-            <input type="text" id="provider-default-model" class="form-input" placeholder="Модель по умолчанию">
+            <select id="provider-default-model" class="form-input">
+                <option value="">-- Выберите модель --</option>
+            </select>
         </div>
         
         <div class="form-group">
@@ -153,6 +173,58 @@
             <button class="btn btn-secondary" onclick="closeModal()">Отмена</button>
             <button class="btn btn-primary" onclick="saveProvider()">Сохранить</button>
             <button class="btn btn-danger" id="btn-delete-provider" style="display: none;" onclick="deleteProvider()">Удалить</button>
+        </div>
+    </div>
+</div>
+
+<div id="model-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3 id="model-modal-title">Добавить модель</h3>
+        
+        <div class="form-group">
+            <label for="model-name">Название модели</label>
+            <input type="text" id="model-name" class="form-input" placeholder="gpt-4o">
+        </div>
+        
+        <div class="form-group">
+            <label for="model-provider">Провайдер</label>
+            <select id="model-provider" class="form-input">
+                <option value="*">* (любой)</option>
+                <option value="openai">openai</option>
+                <option value="anthropic">anthropic</option>
+                <option value="ollama">ollama</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="model-context">Размер контекстного окна (токенов)</label>
+            <input type="number" id="model-context" class="form-input" placeholder="128000" min="1">
+        </div>
+        
+        <div class="form-group">
+            <label for="model-input-price">Цена за 1M входных токенов ($)</label>
+            <input type="number" id="model-input-price" class="form-input" placeholder="0" min="0" step="0.01">
+        </div>
+        
+        <div class="form-group">
+            <label for="model-output-price">Цена за 1M выходных токенов ($)</label>
+            <input type="number" id="model-output-price" class="form-input" placeholder="0" min="0" step="0.01">
+        </div>
+        
+        <div class="form-group">
+            <label for="model-cache-read">Цена за 1M кэш-чтения ($)</label>
+            <input type="number" id="model-cache-read" class="form-input" placeholder="0" min="0" step="0.01">
+        </div>
+        
+        <div class="form-group">
+            <label for="model-cache-write">Цена за 1M кэш-записи ($)</label>
+            <input type="number" id="model-cache-write" class="form-input" placeholder="0" min="0" step="0.01">
+        </div>
+        
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeModelModal()">Отмена</button>
+            <button class="btn btn-primary" onclick="saveModel()">Сохранить</button>
+            <button class="btn btn-danger" id="btn-delete-model" style="display: none;" onclick="deleteCurrentModel()">Удалить</button>
         </div>
     </div>
 </div>
@@ -254,6 +326,7 @@
         renderProviders();
         loadContextFileList();
         loadSummarizerConfig();
+        loadModelList();
     }
 
     function loadSummarizerConfig() {
@@ -391,6 +464,35 @@
         }
     }
 
+    async function loadModelSelect(providerFilter = null) {
+        const select = document.getElementById('provider-default-model');
+        select.innerHTML = '<option value="">-- Выберите модель --</option>';
+        
+        try {
+            const response = await fetch('/admin/models/available', { headers: getAuthHeaders() });
+            const data = await response.json();
+            const models = data.models || {};
+            
+            let modelNames = Object.keys(models);
+            if (providerFilter) {
+                modelNames = modelNames.filter(m => 
+                    (models[m].provider || '*') === providerFilter || 
+                    (models[m].provider || '*') === '*'
+                );
+            }
+            modelNames.sort();
+            
+            for (const name of modelNames) {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = `${name} (${models[name].provider || '*'})`;
+                select.appendChild(option);
+            }
+        } catch (e) {
+            console.error('Failed to load models:', e);
+        }
+    }
+
     function showAddProvider() {
         document.getElementById('modal-title').textContent = 'Добавить провайдера';
         document.getElementById('edit-provider-name').value = '';
@@ -403,6 +505,7 @@
         document.getElementById('btn-delete-provider').style.display = 'none';
         document.getElementById('provider-name').disabled = false;
         document.getElementById('provider-modal').style.display = 'flex';
+        loadModelSelect();
     }
 
     function editProvider(name) {
@@ -418,6 +521,7 @@
         document.getElementById('btn-delete-provider').style.display = 'inline-block';
         document.getElementById('provider-name').disabled = true;
         document.getElementById('provider-modal').style.display = 'flex';
+        loadModelSelect(provider.type || name);
     }
 
     function closeModal() {
@@ -755,6 +859,250 @@
         } catch (e) {
             alert('Ошибка: ' + e.message);
         }
+    }
+
+    // ============ Models ============
+    async function fetchModelsFromProviders() {
+        const statusEl = document.getElementById('fetch-models-status');
+        statusEl.textContent = 'Загрузка...';
+        
+        try {
+            const response = await fetch('/admin/models/fetch', {
+                method: 'POST',
+                headers: getAuthHeaders()
+            });
+            const data = await response.json();
+            
+            if (data.status === 'completed') {
+                let total = 0;
+                for (const [provider, result] of Object.entries(data.results || {})) {
+                    if (result.status === 'ok') {
+                        total += result.count || 0;
+                    }
+                }
+                statusEl.textContent = `Загружено ${total} моделей`;
+                loadModelList();
+            } else {
+                statusEl.textContent = 'Ошибка';
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            statusEl.textContent = 'Ошибка';
+            console.error('Failed to fetch models:', e);
+            alert('Ошибка: ' + e.message);
+        }
+        
+        setTimeout(() => {
+            statusEl.textContent = '';
+        }, 3000);
+    }
+
+    async function loadModelList() {
+        try {
+            const response = await fetch('/admin/models', { headers: getAuthHeaders() });
+            const data = await response.json();
+            renderModels(data.models || {});
+        } catch (e) {
+            console.error('Failed to load models:', e);
+            document.getElementById('models-list').innerHTML = '<div class="error">Ошибка загрузки моделей</div>';
+        }
+    }
+
+    function renderModels(models) {
+        const container = document.getElementById('models-list');
+        const modelNames = Object.keys(models);
+        
+        if (modelNames.length === 0) {
+            container.innerHTML = '<p>Нет моделей в справочнике</p>';
+            return;
+        }
+
+        // Sort by provider, then by model name
+        modelNames.sort((a, b) => {
+            const providerA = models[a].provider || '*';
+            const providerB = models[b].provider || '*';
+            if (providerA !== providerB) {
+                return providerA.localeCompare(providerB);
+            }
+            return a.localeCompare(b);
+        });
+
+        let html = '<table class="models-table" style="width: 100%; border-collapse: collapse;">';
+        html += '<thead><tr><th style="text-align: center; padding: 8px; border-bottom: 1px solid var(--border);">✓</th>';
+        html += '<th style="text-align: left; padding: 8px; border-bottom: 1px solid var(--border);">Модель</th>';
+        html += '<th style="text-align: center; padding: 8px; border-bottom: 1px solid var(--border);">Провайдер</th>';
+        html += '<th style="text-align: right; padding: 8px; border-bottom: 1px solid var(--border);">Context</th>';
+        html += '<th style="text-align: right; padding: 8px; border-bottom: 1px solid var(--border);">Input</th>';
+        html += '<th style="text-align: right; padding: 8px; border-bottom: 1px solid var(--border);">Output</th>';
+        html += '<th style="text-align: center; padding: 8px; border-bottom: 1px solid var(--border);">Действия</th></tr></thead>';
+        html += '<tbody>';
+
+        for (const name of modelNames) {
+            const m = models[name];
+            const enabled = m.enabled !== false;
+            html += '<tr>';
+            html += `<td style="text-align: center; padding: 8px; border-bottom: 1px solid var(--border);"><input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleModelEnabled('${escapeHtml(name)}', this.checked)"></td>`;
+            html += `<td style="padding: 8px; border-bottom: 1px solid var(--border);"><code>${escapeHtml(name)}</code></td>`;
+            html += `<td style="text-align: center; padding: 8px; border-bottom: 1px solid var(--border);">${m.provider || '*'}</td>`;
+            html += `<td style="text-align: right; padding: 8px; border-bottom: 1px solid var(--border);">${m.context_window?.toLocaleString() || '-'}</td>`;
+            html += `<td style="text-align: right; padding: 8px; border-bottom: 1px solid var(--border);">$${m.input_price || 0}</td>`;
+            html += `<td style="text-align: right; padding: 8px; border-bottom: 1px solid var(--border);">$${m.output_price || 0}</td>`;
+            
+            const editBtn = `<button class="btn btn-small" onclick="editModel('${escapeHtml(name)}')">Изменить</button>`;
+            html += `<td style="text-align: center; padding: 8px; border-bottom: 1px solid var(--border);">${editBtn}</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    async function toggleModelEnabled(name, enabled) {
+        try {
+            const response = await fetch('/admin/models', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    name: name,
+                    enabled: enabled,
+                })
+            });
+            const data = await response.json();
+            if (data.status !== 'saved') {
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+                loadModelList();
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+            loadModelList();
+        }
+    }
+
+    function editModel(name) {
+        document.getElementById('model-modal-title').textContent = 'Изменить модель';
+        document.getElementById('model-name').value = name;
+        document.getElementById('model-name').readOnly = true;
+        document.getElementById('btn-delete-model').style.display = 'inline-block';
+        
+        fetch('/admin/models', { headers: getAuthHeaders() })
+            .then(r => r.json())
+            .then(data => {
+                const model = data.models[name];
+                if (model) {
+                    document.getElementById('model-provider').value = model.provider || '*';
+                    document.getElementById('model-context').value = model.context_window || 128000;
+                    document.getElementById('model-input-price').value = model.input_price || 0;
+                    document.getElementById('model-output-price').value = model.output_price || 0;
+                    document.getElementById('model-cache-read').value = model.cache_read_price || 0;
+                    document.getElementById('model-cache-write').value = model.cache_write_price || 0;
+                }
+            });
+        
+        document.getElementById('model-modal').style.display = 'flex';
+    }
+
+    function showAddModel() {
+        document.getElementById('model-modal-title').textContent = 'Добавить модель';
+        document.getElementById('model-name').value = '';
+        document.getElementById('model-name').readOnly = false;
+        document.getElementById('model-provider').value = '*';
+        document.getElementById('model-context').value = '128000';
+        document.getElementById('model-input-price').value = '0';
+        document.getElementById('model-output-price').value = '0';
+        document.getElementById('model-cache-read').value = '0';
+        document.getElementById('model-cache-write').value = '0';
+        document.getElementById('btn-delete-model').style.display = 'none';
+        document.getElementById('model-modal').style.display = 'flex';
+    }
+
+    function closeModelModal() {
+        document.getElementById('model-modal').style.display = 'none';
+    }
+
+    async function saveModel() {
+        const name = document.getElementById('model-name').value.trim();
+        if (!name) {
+            alert('Введите название модели');
+            return;
+        }
+
+        const provider = document.getElementById('model-provider').value;
+        const contextWindow = parseInt(document.getElementById('model-context').value) || 128000;
+        const inputPrice = parseFloat(document.getElementById('model-input-price').value) || 0;
+        const outputPrice = parseFloat(document.getElementById('model-output-price').value) || 0;
+        const cacheReadPrice = parseFloat(document.getElementById('model-cache-read').value) || 0;
+        const cacheWritePrice = parseFloat(document.getElementById('model-cache-write').value) || 0;
+
+        try {
+            const response = await fetch('/admin/models', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    name: name,
+                    provider: provider,
+                    context_window: contextWindow,
+                    input_price: inputPrice,
+                    output_price: outputPrice,
+                    cache_read_price: cacheReadPrice,
+                    cache_write_price: cacheWritePrice,
+                })
+            });
+            const data = await response.json();
+            if (data.status === 'saved') {
+                closeModelModal();
+                loadModelList();
+            } else {
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function deleteCurrentModel() {
+        const name = document.getElementById('model-name').value;
+        if (!confirm(`Удалить модель ${name}?`)) return;
+        
+        try {
+            const response = await fetch(`/admin/models/${encodeURIComponent(name)}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+            const data = await response.json();
+            if (data.status === 'deleted') {
+                closeModelModal();
+                loadModelList();
+            } else {
+                alert('Ошибка: ' + (data.error || 'Cannot delete'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function deleteModel(name) {
+        if (!confirm(`Удалить модель ${name}?`)) return;
+        
+        try {
+            const response = await fetch(`/admin/models/${encodeURIComponent(name)}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+            const data = await response.json();
+            if (data.status === 'deleted') {
+                loadModelList();
+            } else {
+                alert('Ошибка: ' + (data.error || 'Cannot delete'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 </script>
 

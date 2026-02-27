@@ -54,6 +54,7 @@ class FileStorage:
                     "usage": m.usage,
                     "debug": m.debug,
                     "model": m.model,
+                    "created_at": m.created_at.isoformat(),
                 }
                 for m in session.messages
             ],

@@ -50,12 +50,30 @@ def summarize_messages(messages: list[Message], debug: bool = False) -> tuple[st
     return response.content, debug_info
 
 
-def should_summarize(session, current_message_count: int) -> bool:
+def should_summarize(session, current_message_count: int) -> tuple[bool, str]:
+    """
+    Проверяет, нужно ли запустить суммаризацию.
+    Возвращает tuple(нужна ли суммаризация, причина).
+    """
     enabled = session.user_settings.get("summarization_enabled", False)
     if not enabled:
-        return False
+        return False, "disabled"
 
-    interval = session.user_settings.get("summarize_after_n", config.default_messages_interval)
     count_since_summary = session.get_user_message_count_since_summary()
-    print(f"[DEBUG summarizer] enabled={enabled}, interval={interval}, count_since_summary={count_since_summary}")
-    return count_since_summary >= interval
+    interval = session.user_settings.get("summarize_after_n", config.default_messages_interval)
+    if count_since_summary >= interval:
+        return True, f"messages_count:{count_since_summary}/{interval}"
+
+    time_minutes = session.user_settings.get("summarize_after_minutes", 0)
+    if time_minutes > 0:
+        age = session.get_oldest_message_age_minutes()
+        if age >= time_minutes:
+            return True, f"time:{age}/{time_minutes}min"
+
+    context_percent = session.user_settings.get("summarize_context_percent", 0)
+    if context_percent > 0:
+        usage = session.get_context_usage_percent()
+        if usage >= context_percent:
+            return True, f"context:{usage:.1f}/{context_percent}%"
+
+    return False, "none"

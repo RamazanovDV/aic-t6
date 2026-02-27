@@ -62,20 +62,37 @@
                 <input type="checkbox" id="summarization-enabled">
                 <span>Включить суммаризацию</span>
             </label>
-            <p class="help-text">При включённой суммаризации, каждые N сообщений будет создаваться краткое резюме диалога.</p>
+            <p class="help-text">При включённой суммаризации, будет создаваться краткое резюме диалога по заданным условиям.</p>
         </div>
 
         <div class="settings-section">
             <label>
-                Интервал (каждые N сообщений):
-                <input type="number" id="summarization-interval" min="5" max="100" value="10">
+                По количеству сообщений:
+                <input type="number" id="summarization-interval" min="0" max="100" value="10">
             </label>
-            <p class="help-text">Количество сообщений после которых запускается суммаризация (5-100).</p>
+            <p class="help-text">Количество сообщений пользователя после последнего summary для запуска (0 - отключено).</p>
+        </div>
+
+        <div class="settings-section">
+            <label>
+                По времени (минут):
+                <input type="number" id="summarization-minutes" min="0" max="10080" value="0">
+            </label>
+            <p class="help-text">Возраст сообщений в минутах для запуска суммаризации (0 - отключено, 60 = час, 1440 = день).</p>
+        </div>
+
+        <div class="settings-section">
+            <label>
+                По объёму контекста (%):
+                <input type="number" id="summarization-percent" min="0" max="100" value="0">
+            </label>
+            <p class="help-text">Процент от контекстного окна модели для запуска суммаризации (0 - отключено, 75 = 75%).</p>
         </div>
 
         <div class="modal-actions">
             <button class="btn btn-secondary" onclick="closeSummarizationModal()">Отмена</button>
             <button class="btn btn-primary" onclick="saveSummarizationSettings()">Сохранить</button>
+            <button class="btn btn-secondary" onclick="triggerManualSummarize()">Запустить сейчас</button>
         </div>
     </div>
 </div>
@@ -1099,7 +1116,9 @@
             .then(r => r.json())
             .then(data => {
                 document.getElementById('summarization-enabled').checked = data.summarization_enabled;
-                document.getElementById('summarization-interval').value = data.summarize_after_n;
+                document.getElementById('summarization-interval').value = data.summarize_after_n || 0;
+                document.getElementById('summarization-minutes').value = data.summarize_after_minutes || 0;
+                document.getElementById('summarization-percent').value = data.summarize_context_percent || 0;
                 document.getElementById('summarization-modal').dataset.panelIndex = panelIndex;
             })
             .catch(err => console.error('Failed to load summarization settings:', err));
@@ -1117,14 +1136,18 @@
         const sessionId = panels[panelIndex] ? panels[panelIndex].sessionId : 'default';
         
         const enabled = document.getElementById('summarization-enabled').checked;
-        const interval = parseInt(document.getElementById('summarization-interval').value);
+        const interval = parseInt(document.getElementById('summarization-interval').value) || 0;
+        const minutes = parseInt(document.getElementById('summarization-minutes').value) || 0;
+        const percent = parseInt(document.getElementById('summarization-percent').value) || 0;
         
         fetch(`/api/sessions/${sessionId}/summarization-settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 summarization_enabled: enabled,
-                summarize_after_n: interval
+                summarize_after_n: interval,
+                summarize_after_minutes: minutes,
+                summarize_context_percent: percent
             })
         })
             .then(r => r.json())
@@ -1132,6 +1155,27 @@
                 closeSummarizationModal();
             })
             .catch(err => console.error('Failed to save summarization settings:', err));
+    }
+
+    function triggerManualSummarize() {
+        const modal = document.getElementById('summarization-modal');
+        const panelIndex = parseInt(modal.dataset.panelIndex) || 0;
+        const sessionId = panels[panelIndex] ? panels[panelIndex].sessionId : 'default';
+        
+        fetch(`/api/sessions/${sessionId}/summarize`, { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Ошибка: ' + data.error);
+                } else {
+                    closeSummarizationModal();
+                    addMessageToPanel(panelIndex, 'assistant', data.summary || 'Суммаризация завершена');
+                }
+            })
+            .catch(err => {
+                console.error('Failed to summarize:', err);
+                alert('Ошибка при суммаризации');
+            });
     }
 
     async function loadSettingsSessionsList() {

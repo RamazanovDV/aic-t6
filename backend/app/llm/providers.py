@@ -297,11 +297,9 @@ class AnthropicProvider(BaseProvider):
             }
 
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
-        print(f"DEBUG GenericOpenAIProvider: status={response.status_code}, content_length={len(response.content)}")
         try:
             response.raise_for_status()
-        except requests.HTTPError as e:
-            print(f"DEBUG GenericOpenAIProvider: HTTP error: {response.status_code}, body={response.text[:500]}")
+        except requests.HTTPError:
             if response.status_code in (400, 422):
                 error_data = response.json() if response.content else {}
                 error_message = ""

@@ -181,5 +181,130 @@ class Config:
     def default_messages_interval(self) -> int:
         return self.summarization_config.get("default_messages_interval", 10)
 
+    DEFAULT_MODELS = {
+        "gpt-4o": {
+            "provider": "openai",
+            "context_window": 128000,
+            "input_price": 2.5,
+            "output_price": 10.0,
+            "cache_read_price": 1.25,
+            "cache_write_price": 3.75,
+            "enabled": True,
+        },
+        "gpt-4o-mini": {
+            "provider": "openai",
+            "context_window": 128000,
+            "input_price": 0.15,
+            "output_price": 0.6,
+            "cache_read_price": 0.075,
+            "cache_write_price": 0.3,
+            "enabled": True,
+        },
+        "gpt-4-turbo": {
+            "provider": "openai",
+            "context_window": 128000,
+            "input_price": 10.0,
+            "output_price": 30.0,
+            "cache_read_price": 10.0,
+            "cache_write_price": 15.0,
+        },
+        "gpt-3.5-turbo": {
+            "provider": "openai",
+            "context_window": 16385,
+            "input_price": 0.5,
+            "output_price": 1.5,
+            "cache_read_price": 0.0,
+            "cache_write_price": 0.0,
+        },
+        "claude-3-5-sonnet-20241022": {
+            "provider": "anthropic",
+            "context_window": 200000,
+            "input_price": 3.0,
+            "output_price": 15.0,
+            "cache_read_price": 3.75,
+            "cache_write_price": 15.0,
+        },
+        "claude-3-5-sonnet-20240620": {
+            "provider": "anthropic",
+            "context_window": 200000,
+            "input_price": 3.0,
+            "output_price": 15.0,
+            "cache_read_price": 3.75,
+            "cache_write_price": 15.0,
+        },
+        "claude-3-opus-20240229": {
+            "provider": "anthropic",
+            "context_window": 200000,
+            "input_price": 15.0,
+            "output_price": 75.0,
+            "cache_read_price": 15.0,
+            "cache_write_price": 75.0,
+        },
+        "claude-3-haiku-20240307": {
+            "provider": "anthropic",
+            "context_window": 200000,
+            "input_price": 0.25,
+            "output_price": 1.25,
+            "cache_read_price": 0.3,
+            "cache_write_price": 1.25,
+        },
+        "llama3": {
+            "provider": "ollama",
+            "context_window": 8192,
+            "input_price": 0.0,
+            "output_price": 0.0,
+            "cache_read_price": 0.0,
+            "cache_write_price": 0.0,
+        },
+        "llama3.1": {
+            "provider": "ollama",
+            "context_window": 128000,
+            "input_price": 0.0,
+            "output_price": 0.0,
+            "cache_read_price": 0.0,
+            "cache_write_price": 0.0,
+        },
+        "mistral": {
+            "provider": "ollama",
+            "context_window": 8192,
+            "input_price": 0.0,
+            "output_price": 0.0,
+            "cache_read_price": 0.0,
+            "cache_write_price": 0.0,
+        },
+    }
+
+    @property
+    def models(self) -> dict[str, dict]:
+        return self._config.get("models", self.DEFAULT_MODELS)
+
+    def get_model_info(self, model_name: str) -> dict | None:
+        return self.models.get(model_name) or self.DEFAULT_MODELS.get(model_name)
+
+    def get_context_window(self, model_name: str) -> int:
+        info = self.get_model_info(model_name)
+        return info.get("context_window", 128000) if info else 128000
+
+    def set_model_info(self, model_name: str, info: dict) -> None:
+        if "models" not in self._config:
+            self._config["models"] = dict(self.DEFAULT_MODELS)
+        
+        existing = self._config["models"].get(model_name)
+        if existing:
+            self._config["models"][model_name] = {**existing, **info}
+        else:
+            self._config["models"][model_name] = info
+        self.save()
+
+    def delete_model(self, model_name: str) -> bool:
+        if "models" not in self._config:
+            self._config["models"] = dict(self.DEFAULT_MODELS)
+        
+        if model_name in self._config["models"]:
+            del self._config["models"][model_name]
+            self.save()
+            return True
+        return False
+
 
 config = Config()

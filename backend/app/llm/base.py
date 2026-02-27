@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Generator
 
 
@@ -11,6 +12,7 @@ class Message:
     debug: dict | None = None
     model: str | None = None
     summary_of: list[int] | None = None
+    created_at: datetime = field(default_factory=datetime.now)
 
 
 @dataclass
