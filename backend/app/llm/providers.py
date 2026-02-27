@@ -44,7 +44,7 @@ class GenericOpenAIProvider(BaseProvider):
         payload = {
             "model": self.model,
             "messages": formatted_messages,
-            "temperature": 0.7,
+            "temperature": self.temperature,
         }
 
         debug_request = None
@@ -141,7 +141,7 @@ class GenericOpenAIProvider(BaseProvider):
         payload = {
             "model": self.model,
             "messages": formatted_messages,
-            "temperature": 0.7,
+            "temperature": self.temperature,
             "stream": True,
         }
 
@@ -208,7 +208,7 @@ class OpenAIProvider(GenericOpenAIProvider):
         payload = {
             "model": self.model,
             "messages": formatted_messages,
-            "temperature": 0.7,
+            "temperature": self.temperature,
         }
 
         debug_request = None
@@ -541,7 +541,7 @@ class OllamaProvider(BaseProvider):
         payload = {
             "model": self.model,
             "messages": formatted_messages,
-            "temperature": 0.7,
+            "temperature": self.temperature,
             "stream": True,
         }
 

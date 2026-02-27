@@ -25,5 +25,11 @@ llm:
       api_key: "ollama"
       model: "llama3"
 
+summarizer:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  temperature: 0.3
+  prompt_source: "SUMMARIZER.md"
+
 storage:
   data_dir: "/home/eof/dev/aic/t6/data"

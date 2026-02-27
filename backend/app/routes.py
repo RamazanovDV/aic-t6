@@ -8,6 +8,7 @@ from app.context import get_system_prompt
 from app.llm import ProviderFactory
 from app.llm.providers import ContextLengthExceededError
 from app.session import session_manager
+from app import summarizer
 
 api_bp = Blueprint("api", __name__)
 admin_bp = Blueprint("admin", __name__)
@@ -104,8 +105,26 @@ def chat():
 
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
+
+    current_count = session.get_active_message_count()
     session.add_user_message(user_message)
-    
+
+    if summarizer.should_summarize(session, current_count):
+        messages_to_summarize = session.get_messages_before_last_user()
+        if messages_to_summarize:
+            summary_content, debug_info = summarizer.summarize_messages(
+                messages_to_summarize,
+                debug=debug_mode,
+            )
+            summarized_indices = list(range(len(messages_to_summarize)))
+            session.add_summary_message(
+                content=summary_content,
+                summarized_indices=summarized_indices,
+                usage={},
+                debug=debug_info if debug_mode else None,
+                model=config.summarizer_model,
+            )
+
     if provider_name and model:
         session.set_provider_model(provider_name, model)
     elif provider_name and not session.provider:
@@ -114,7 +133,8 @@ def chat():
     system_prompt = get_system_prompt()
 
     try:
-        response = provider.chat(session.messages, system_prompt, debug=debug_mode)
+        llm_messages = session.get_messages_for_llm()
+        response = provider.chat(llm_messages, system_prompt, debug=debug_mode)
     except ContextLengthExceededError as e:
         session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
         session_manager.save_session(session_id)
@@ -192,22 +212,93 @@ def chat_stream():
 
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
-    session.add_user_message(user_message)
 
-    if provider_name and model:
-        session.set_provider_model(provider_name, model)
-    elif provider_name and not session.provider:
-        session.set_provider_model(provider_name, config.get_default_model(provider_name))
-
-    system_prompt = get_system_prompt()
-
-    formatted_messages = []
-    if system_prompt:
-        formatted_messages.append({"role": "system", "content": system_prompt})
-    for msg in session.messages:
-        formatted_messages.append({"role": msg.role, "content": msg.content})
+    needs_summarization = summarizer.should_summarize(session, 0)
 
     def generate():
+        nonlocal needs_summarization
+
+        user_msg_for_llm = user_message
+        summary_content = None
+
+        if needs_summarization:
+            yield f"data: {json.dumps({'type': 'summarizing'})}\n\n"
+
+            messages_to_summarize = session.get_messages_before_last_user()
+            if messages_to_summarize:
+                try:
+                    summary_content, debug_info = summarizer.summarize_messages(
+                        messages_to_summarize,
+                        debug=debug_mode,
+                    )
+                    summarized_indices = list(range(len(messages_to_summarize)))
+                    session.add_summary_message(
+                        content=summary_content,
+                        summarized_indices=summarized_indices,
+                        usage={},
+                        debug=debug_info if debug_mode else None,
+                        model=config.summarizer_model,
+                    )
+                    yield f"data: {json.dumps({'type': 'summary', 'content': summary_content})}\n\n"
+                except Exception as e:
+                    error_msg = f"Ошибка суммаризации: {str(e)}"
+                    yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+        else:
+            # Без суммаризации - добавляем user message в сессию сейчас
+            session.add_user_message(user_message)
+
+        if provider_name and model:
+            session.set_provider_model(provider_name, model)
+        elif provider_name and not session.provider:
+            session.set_provider_model(provider_name, config.get_default_model(provider_name))
+
+        system_prompt = get_system_prompt()
+
+        # Формируем сообщения для LLM
+        formatted_messages = []
+        if system_prompt:
+            formatted_messages.append({"role": "system", "content": system_prompt})
+
+        if needs_summarization and summary_content:
+            # При суммаризации - добавляем summary к system prompt + последнее user message
+            summary_text = f"До этого вы обсудили следующее:\n{summary_content}"
+            if formatted_messages and formatted_messages[0]["role"] == "system":
+                formatted_messages[0]["content"] = f"{formatted_messages[0]['content']}\n\n{summary_text}"
+            else:
+                formatted_messages.insert(0, {"role": "system", "content": summary_text})
+            formatted_messages.append({"role": "user", "content": user_msg_for_llm})
+        else:
+            # Без суммаризации - отправляем сообщения ПОСЛЕ последнего summary
+            # Находим последний summary
+            last_summary_idx = None
+            for i in range(len(session.messages) - 1, -1, -1):
+                if session.messages[i].role == "summary":
+                    last_summary_idx = i
+                    break
+            
+            # Находим последний summary для добавления в system prompt
+            last_summary = None
+            for msg in session.messages:
+                if msg.role == "summary":
+                    last_summary = msg
+            
+            # Отправляем сообщения после последнего summary
+            start_idx = (last_summary_idx + 1) if last_summary_idx is not None else 0
+            for msg in session.messages[start_idx:]:
+                formatted_messages.append({"role": msg.role, "content": msg.content})
+            
+            # Добавляем только последний summary в system prompt
+            if last_summary:
+                summary_text = f"До этого вы обсудили следующее:\n{last_summary.content}"
+                if formatted_messages and formatted_messages[0]["role"] == "system":
+                    formatted_messages[0]["content"] = f"{formatted_messages[0]['content']}\n\n{summary_text}"
+                else:
+                    formatted_messages.insert(0, {"role": "system", "content": summary_text})
+
+        print(f"[DEBUG] formatted_messages: {[(m['role'], m['content'][:30]) for m in formatted_messages]}")
+
         full_content = ""
         total_usage = {}
         debug_request = None
@@ -228,7 +319,10 @@ def chat_stream():
             }
 
         try:
-            for chunk in provider.stream_chat(session.messages, system_prompt, debug=debug_mode):
+            # Конвертируем в Message объекты
+            from app.llm.base import Message
+            llm_msgs = [Message(role=m["role"], content=m["content"], usage={}) for m in formatted_messages]
+            for chunk in provider.stream_chat(llm_msgs, None, debug=debug_mode):
                 if chunk.is_final:
                     total_usage = chunk.usage
                     debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
@@ -243,6 +337,11 @@ def chat_stream():
             yield f"data: {json.dumps({'content': full_content, 'done': True, 'usage': total_usage, 'debug': {'request': debug_request, 'response': debug_response}})}\n\n"
 
             debug_info = {"request": debug_request, "response": debug_response} if debug_mode else None
+            
+            # Сохраняем сообщения в сессию
+            if needs_summarization:
+                # При суммаризации user message ещё не был добавлен
+                session.add_user_message(user_msg_for_llm)
             session.add_assistant_message(full_content, total_usage, debug=debug_info, model=provider.model)
             session_manager.save_session(session_id)
 
@@ -365,6 +464,50 @@ def clear_session_debug(session_id: str):
     return jsonify({"status": "cleared", "session_id": session_id})
 
 
+@api_bp.route("/sessions/<session_id>/summarization-settings", methods=["GET"])
+@require_auth
+def get_summarization_settings(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    enabled = session.user_settings.get("summarization_enabled", False)
+    interval = session.user_settings.get("summarize_after_n", config.default_messages_interval)
+
+    return jsonify({
+        "summarization_enabled": enabled,
+        "summarize_after_n": interval,
+        "default_interval": config.default_messages_interval,
+    })
+
+
+@api_bp.route("/sessions/<session_id>/summarization-settings", methods=["POST"])
+@require_auth
+def set_summarization_settings(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    if "summarization_enabled" in data:
+        session.user_settings["summarization_enabled"] = bool(data["summarization_enabled"])
+
+    if "summarize_after_n" in data:
+        interval = int(data["summarize_after_n"])
+        if interval < 5:
+            interval = 5
+        if interval > 100:
+            interval = 100
+        session.user_settings["summarize_after_n"] = interval
+
+    session_manager.save_session(session_id)
+
+    return jsonify({"status": "saved"})
+
+
 @api_bp.route("/sessions/export", methods=["POST"])
 @require_auth
 def export_sessions():
@@ -403,6 +546,8 @@ def get_config():
         "default_provider": config.default_provider,
         "providers": config.providers,
         "default_models": default_models,
+        "summarizer": config.summarizer_config,
+        "summarization": config.summarization_config,
     })
 
 
@@ -420,6 +565,12 @@ def save_config():
             config._config["default_provider"] = data["default_provider"]
         if "providers" in data:
             config._config["providers"] = data["providers"]
+        if "summarizer" in data:
+            config._config["summarizer"] = data["summarizer"]
+        if "summarization" in data:
+            if "summarization" not in config._config:
+                config._config["summarization"] = {}
+            config._config["summarization"].update(data["summarization"])
         
         config.save()
         return jsonify({"status": "saved"})

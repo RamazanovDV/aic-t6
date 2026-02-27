@@ -308,6 +308,58 @@ def get_session(session_id: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/sessions/<session_id>/summarization-settings", methods=["GET"])
+def get_summarization_settings(session_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/summarization-settings"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 404:
+            return jsonify({"summarization_enabled": False, "summarize_after_n": 10, "default_interval": 10})
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/summarization-settings", methods=["POST"])
+def set_summarization_settings(session_id: str):
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    url = f"{ui_config.backend_url}/sessions/{session_id}/summarization-settings"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/clear-debug", methods=["POST"])
+def clear_session_debug(session_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/clear-debug"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/sessions/<session_id>/messages", methods=["GET"])
 def get_session_messages(session_id: str):
     url = f"{ui_config.backend_url}/sessions/{session_id}"

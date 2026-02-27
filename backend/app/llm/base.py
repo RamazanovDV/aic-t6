@@ -10,6 +10,7 @@ class Message:
     usage: dict[str, int] = field(default_factory=dict)
     debug: dict | None = None
     model: str | None = None
+    summary_of: list[int] | None = None
 
 
 @dataclass
@@ -29,11 +30,12 @@ class LLMChunk:
 
 
 class BaseProvider(ABC):
-    def __init__(self, url: str, api_key: str, model: str, timeout: int = 120):
+    def __init__(self, url: str, api_key: str, model: str, timeout: int = 120, temperature: float = 0.7):
         self.url = url
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.temperature = temperature
 
     @abstractmethod
     def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> LLMResponse:
@@ -99,6 +101,7 @@ class ProviderFactory:
             api_key=config.get("api_key", ""),
             model=config.get("model", ""),
             timeout=config.get("timeout", 120),
+            temperature=config.get("temperature", 0.7),
         )
 
     @classmethod

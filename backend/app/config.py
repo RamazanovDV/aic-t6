@@ -153,5 +153,33 @@ class Config:
             enabled = [new_name if f == old_name else f for f in enabled]
             self.set_enabled_context_files(enabled)
 
+    @property
+    def summarizer_config(self) -> dict[str, Any]:
+        return self._config.get("summarizer", {})
+
+    @property
+    def summarizer_provider(self) -> str:
+        return self.summarizer_config.get("provider", "openai")
+
+    @property
+    def summarizer_model(self) -> str:
+        return self.summarizer_config.get("model", "gpt-4o-mini")
+
+    @property
+    def summarizer_prompt_source(self) -> str:
+        return self.summarizer_config.get("prompt_source", "SUMMARIZER.md")
+
+    @property
+    def summarizer_temperature(self) -> float:
+        return self.summarizer_config.get("temperature", 0.3)
+
+    @property
+    def summarization_config(self) -> dict[str, Any]:
+        return self._config.get("summarization", {})
+
+    @property
+    def default_messages_interval(self) -> int:
+        return self.summarization_config.get("default_messages_interval", 10)
+
 
 config = Config()

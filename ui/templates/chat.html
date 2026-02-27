@@ -53,6 +53,33 @@
     </div>
 </div>
 
+<div id="summarization-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3>Настройки суммаризации</h3>
+        
+        <div class="settings-section">
+            <label class="checkbox-label">
+                <input type="checkbox" id="summarization-enabled">
+                <span>Включить суммаризацию</span>
+            </label>
+            <p class="help-text">При включённой суммаризации, каждые N сообщений будет создаваться краткое резюме диалога.</p>
+        </div>
+
+        <div class="settings-section">
+            <label>
+                Интервал (каждые N сообщений):
+                <input type="number" id="summarization-interval" min="5" max="100" value="10">
+            </label>
+            <p class="help-text">Количество сообщений после которых запускается суммаризация (5-100).</p>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeSummarizationModal()">Отмена</button>
+            <button class="btn btn-primary" onclick="saveSummarizationSettings()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const PANEL_MODE_KEY = 't6_panel_mode';
     const PANEL_0_SESSION_KEY = 't6_panel_0_session';
@@ -149,6 +176,7 @@
                             <input type="checkbox" class="panel-stream-toggle" data-panel="${index}" checked>
                             <span>Stream</span>
                         </label>
+                        <button class="btn btn-icon" onclick="openSummarizationModal(${index})" title="Настройки суммаризации">📝</button>
                     </div>
                     <button class="btn btn-secondary btn-small" onclick="resetPanelChat(${index})" title="Сбросить чат">🗑️</button>
                 </div>
@@ -817,7 +845,8 @@
             div.appendChild(messageContent);
             rowDiv.appendChild(div);
             
-            panel.messagesContainer.appendChild(rowDiv);
+            // Не добавляем в DOM сразу - дождёмся первого реального чанка
+            // rowDiv будет добавлен после получения первого контента
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -835,20 +864,49 @@
                         try {
                             const data = JSON.parse(dataStr);
 
+                            if (data.type === 'summarizing') {
+                                showSummarizationIndicator(panelIndex, panel.messagesContainer);
+                                continue;
+                            }
+
+                            if (data.type === 'summary') {
+                                hideSummarizationIndicator(panelIndex);
+                                addMessageToPanel(panelIndex, data.content, 'summary', null, null, null);
+                                continue;
+                            }
+
+                            if (data.type === 'error') {
+                                hideSummarizationIndicator(panelIndex);
+                                addMessageToPanel(panelIndex, data.error, 'error', null, null, null);
+                                return;
+                            }
+
                             if (data.error) {
-                                rowDiv.remove();
                                 const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
                                 addMessageToPanel(panelIndex, 'Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
                                 return;
                             }
 
+                            // Добавляем row в DOM при получении первого контента
+                            if (!panel.messagesContainer.contains(rowDiv)) {
+                                panel.messagesContainer.appendChild(rowDiv);
+                            }
+
+                            if (data.content !== undefined) {
+                                // Каждый чанк содержит полный контент до этого момента
+                                fullContent = data.content;
+                                // Показываем raw text при стриминге (экранируем HTML)
+                                messageContent.textContent = fullContent;
+                                panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+                            }
+
                             if (data.done) {
+                                // Применяем markdown только в конце
+                                messageContent.innerHTML = marked.parse(fullContent.trim());
                                 let modelName = null;
                                 if (data.debug && data.debug.response && data.debug.response.model) {
                                     modelName = data.debug.response.model;
                                 }
-                                
-                                messageContent.innerHTML = marked.parse(fullContent.trim());
                                 
                                 if (data.usage) {
                                     const inputTokens = data.usage.input_tokens || 0;
@@ -894,10 +952,6 @@
                                 rowDiv.appendChild(actionsDiv);
                                 
                                 panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
-                            } else {
-                                fullContent = data.content || '';
-                                messageContent.innerHTML = marked.parse(fullContent.trim());
-                                panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
                             }
                         } catch (e) {
                             console.error('Parse error:', e);
@@ -907,11 +961,11 @@
             }
         } catch (err) {
             if (err.name === 'AbortError') {
-                if (rowDiv) rowDiv.remove();
+                rowDiv.remove();
                 addMessageToPanel(panelIndex, 'Запрос прерван', 'error');
                 return;
             }
-            if (rowDiv) rowDiv.remove();
+            rowDiv.remove();
             addMessageToPanel(panelIndex, 'Ошибка соединения: ' + err.message, 'error');
         }
     }
@@ -1007,6 +1061,64 @@
 
     function closeSettingsModal() {
         document.getElementById('settings-modal').style.display = 'none';
+    }
+
+    function showSummarizationIndicator(panelIndex, messagesContainer) {
+        const indicator = document.createElement('div');
+        indicator.className = 'summarizing-indicator';
+        indicator.id = `summarizing-indicator-${panelIndex}`;
+        indicator.textContent = 'Суммаризирую...';
+        messagesContainer.appendChild(indicator);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function hideSummarizationIndicator(panelIndex) {
+        const indicator = document.getElementById(`summarizing-indicator-${panelIndex}`);
+        if (indicator) {
+            indicator.remove();
+        }
+    }
+
+    function openSummarizationModal(panelIndex = 0) {
+        const sessionId = panels[panelIndex] ? panels[panelIndex].sessionId : 'default';
+        
+        fetch(`/api/sessions/${sessionId}/summarization-settings`)
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('summarization-enabled').checked = data.summarization_enabled;
+                document.getElementById('summarization-interval').value = data.summarize_after_n;
+                document.getElementById('summarization-modal').dataset.panelIndex = panelIndex;
+            })
+            .catch(err => console.error('Failed to load summarization settings:', err));
+        
+        document.getElementById('summarization-modal').style.display = 'flex';
+    }
+
+    function closeSummarizationModal() {
+        document.getElementById('summarization-modal').style.display = 'none';
+    }
+
+    function saveSummarizationSettings() {
+        const modal = document.getElementById('summarization-modal');
+        const panelIndex = parseInt(modal.dataset.panelIndex) || 0;
+        const sessionId = panels[panelIndex] ? panels[panelIndex].sessionId : 'default';
+        
+        const enabled = document.getElementById('summarization-enabled').checked;
+        const interval = parseInt(document.getElementById('summarization-interval').value);
+        
+        fetch(`/api/sessions/${sessionId}/summarization-settings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                summarization_enabled: enabled,
+                summarize_after_n: interval
+            })
+        })
+            .then(r => r.json())
+            .then(data => {
+                closeSummarizationModal();
+            })
+            .catch(err => console.error('Failed to save summarization settings:', err));
     }
 
     async function loadSettingsSessionsList() {

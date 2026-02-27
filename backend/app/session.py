@@ -59,6 +59,96 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
+    def add_summary_message(
+        self,
+        content: str,
+        summarized_indices: list[int],
+        usage: dict[str, int] | None = None,
+        debug: dict | None = None,
+        model: str | None = None,
+    ) -> None:
+        msg = Message(
+            role="summary",
+            content=content,
+            usage=usage or {},
+            debug=debug,
+            model=model,
+            summary_of=summarized_indices,
+        )
+        self.messages.append(msg)
+        if usage:
+            self.total_tokens += usage.get("total_tokens", 0)
+            self.input_tokens += usage.get("input_tokens", 0)
+            self.output_tokens += usage.get("output_tokens", 0)
+        self.updated_at = datetime.now()
+
+    def get_messages_for_llm(self) -> list[Message]:
+        """Вернуть сообщения для LLM: summary + последний user message (после summary)"""
+        if not self.messages:
+            return []
+
+        last_summary_idx = None
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].role == "summary":
+                last_summary_idx = i
+                break
+
+        if last_summary_idx is None:
+            return self.messages
+
+        # summary всегда первым
+        result = [self.messages[last_summary_idx]]
+        
+        # Ищем последний user message ПОСЛЕ summary
+        for i in range(len(self.messages) - 1, last_summary_idx, -1):
+            if self.messages[i].role == "user":
+                result.append(self.messages[i])
+                break
+
+        return result
+
+    def get_active_message_count(self) -> int:
+        return sum(1 for m in self.messages if m.role in ("user", "assistant"))
+
+    def get_user_message_count_since_summary(self) -> int:
+        """Количество сообщений пользователя после последнего summary"""
+        # Ищем последний summary
+        last_summary_idx = None
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].role == "summary":
+                last_summary_idx = i
+                break
+        
+        if last_summary_idx is None:
+            # Нет summary - считаем все сообщения пользователя
+            return sum(1 for m in self.messages if m.role == "user")
+        
+        # Считаем user сообщения после summary
+        return sum(1 for m in self.messages[last_summary_idx + 1:] if m.role == "user")
+
+    def get_messages_before_last_user(self) -> list[Message]:
+        """Сообщения для суммаризации - все user/assistant ПОСЛЕ последнего summary (до последнего user)"""
+        # Ищем последний summary
+        last_summary_idx = None
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].role == "summary":
+                last_summary_idx = i
+                break
+        
+        # Берем сообщения после summary
+        if last_summary_idx is not None:
+            msgs = self.messages[last_summary_idx + 1:]
+        else:
+            msgs = self.messages
+        
+        # Фильтруем user/assistant
+        active_msgs = [m for m in msgs if m.role in ("user", "assistant")]
+        # Возвращаем все КРОМЕ последнего user
+        return active_msgs[:-1] if active_msgs else []
+
+    def get_summarizable_messages(self) -> list[Message]:
+        return [m for m in self.messages if m.role in ("user", "assistant")]
+
     def to_markdown(self) -> str:
         lines = [f"# Session: {self.session_id}", f"Created: {self.created_at.isoformat()}", ""]
         
@@ -111,6 +201,7 @@ class SessionManager:
                         usage=m.get("usage", {}),
                         debug=m.get("debug"),
                         model=m.get("model"),
+                        summary_of=m.get("summary_of"),
                     )
                     for m in data.get("messages", [])
                 ]
@@ -178,6 +269,8 @@ class SessionManager:
                     content=m["content"],
                     usage=m.get("usage", {}),
                     debug=m.get("debug"),
+                    model=m.get("model"),
+                    summary_of=m.get("summary_of"),
                 )
                 for m in data.get("messages", [])
             ]
