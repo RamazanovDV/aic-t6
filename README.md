@@ -63,7 +63,7 @@ cd ui && source venv/bin/activate && python run.py
 ### 4. Использование
 
 - **Web UI**: http://localhost:5001
-- **Админ-панель**: http://localhost:5001/admin
+- **Админ-панель**: http://localhost:5000/admin
 - **CLI**: см. раздел ниже
 
 ## Конфигурация
@@ -139,7 +139,7 @@ context:
 - Две панели для параллельных сессий
 - Автоматическая суммаризация длинной истории
 
-### Админ-панель (`/admin`)
+### Админ-панель (http://localhost:5000/admin)
 
 - **Auth** - Настройка API ключа для доступа к бэкенду
 - **Providers** - Управление LLM провайдерами
@@ -224,7 +224,9 @@ t6/
 │   │   ├── session.py       # Управление сессиями
 │   │   ├── storage.py       # Файловое хранилище
 │   │   ├── summarizer.py    # Суммаризация сообщений
-│   │   └── llm/             # Провайдеры LLM
+│   │   ├── llm/             # Провайдеры LLM
+│   │   └── templates/       # Шаблоны админки
+│   │       └── admin.html   # Админ-панель
 │   ├── config.yaml
 │   └── run.py
 ├── ui/                      # Web UI (порт 5001)
@@ -232,8 +234,7 @@ t6/
 │   ├── static/
 │   ├── templates/
 │   │   ├── chat.html        # Основной чат
-│   │   ├── admin.html       # Админ-панель
-│   │   └── settings.html    # Настройки
+│   │   └── base.html       # Базовый шаблон
 │   ├── config.yaml
 │   └── run.py
 ├── cli/                     # CLI
