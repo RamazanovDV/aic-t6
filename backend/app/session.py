@@ -118,8 +118,8 @@ class Session:
 
         optimization = self.user_settings.get("context_optimization", "none")
 
-        if optimization == "rolling_window":
-            return self._get_messages_rolling_window()
+        if optimization == "sliding_window":
+            return self._get_messages_sliding_window()
 
         if optimization == "summarization":
             return self._get_messages_with_summarization()
@@ -146,10 +146,10 @@ class Session:
 
         return result
 
-    def _get_messages_rolling_window(self) -> list[Message]:
+    def _get_messages_sliding_window(self) -> list[Message]:
         """Сообщения для LLM со скользящим окном"""
-        window_type = self.user_settings.get("rolling_window_type", "messages")
-        window_limit = self.user_settings.get("rolling_window_limit", 10)
+        window_type = self.user_settings.get("sliding_window_type", "messages")
+        window_limit = self.user_settings.get("sliding_window_limit", 10)
 
         active_messages = [m for m in self.messages if not m.disabled and m.role in ("user", "assistant", "system")]
 

@@ -324,8 +324,8 @@ def get_context_settings(session_id: str):
                 "summarize_after_n": 10,
                 "summarize_after_minutes": 0,
                 "summarize_context_percent": 0,
-                "rolling_window_type": "messages",
-                "rolling_window_limit": 10,
+                "sliding_window_type": "messages",
+                "sliding_window_limit": 10,
                 "default_interval": 10
             })
         response.raise_for_status()

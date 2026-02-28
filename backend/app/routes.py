@@ -135,6 +135,7 @@ def chat():
 
     try:
         llm_messages = session.get_messages_for_llm()
+        session_manager.save_session(session_id)
         response = provider.chat(llm_messages, system_prompt, debug=debug_mode)
     except ContextLengthExceededError as e:
         session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
@@ -264,46 +265,24 @@ def chat_stream():
 
         system_prompt = get_system_prompt()
 
+        # Используем get_messages_for_llm() для поддержки скользящего окна
+        llm_messages = session.get_messages_for_llm()
+        session_manager.save_session(session_id)
+
         # Формируем сообщения для LLM
         formatted_messages = []
         if system_prompt:
             formatted_messages.append({"role": "system", "content": system_prompt})
 
-        if needs_summarization and summary_content:
-            # При суммаризации - добавляем summary к system prompt + последнее user message
-            summary_text = f"До этого вы обсудили следующее:\n{summary_content}"
-            if formatted_messages and formatted_messages[0]["role"] == "system":
-                formatted_messages[0]["content"] = f"{formatted_messages[0]['content']}\n\n{summary_text}"
-            else:
-                formatted_messages.insert(0, {"role": "system", "content": summary_text})
-            formatted_messages.append({"role": "user", "content": user_msg_for_llm})
-        else:
-            # Без суммаризации - отправляем сообщения ПОСЛЕ последнего summary
-            # Находим последний summary
-            last_summary_idx = None
-            for i in range(len(session.messages) - 1, -1, -1):
-                if session.messages[i].role == "summary":
-                    last_summary_idx = i
-                    break
-            
-            # Находим последний summary для добавления в system prompt
-            last_summary = None
-            for msg in session.messages:
-                if msg.role == "summary":
-                    last_summary = msg
-            
-            # Отправляем сообщения после последнего summary
-            start_idx = (last_summary_idx + 1) if last_summary_idx is not None else 0
-            for msg in session.messages[start_idx:]:
-                formatted_messages.append({"role": msg.role, "content": msg.content})
-            
-            # Добавляем только последний summary в system prompt
-            if last_summary:
-                summary_text = f"До этого вы обсудили следующее:\n{last_summary.content}"
+        for msg in llm_messages:
+            if msg.role == "summary":
+                summary_text = f"До этого вы обсудили следующее:\n{msg.content}"
                 if formatted_messages and formatted_messages[0]["role"] == "system":
                     formatted_messages[0]["content"] = f"{formatted_messages[0]['content']}\n\n{summary_text}"
                 else:
                     formatted_messages.insert(0, {"role": "system", "content": summary_text})
+            elif msg.role in ("user", "assistant"):
+                formatted_messages.append({"role": msg.role, "content": msg.content})
 
         full_content = ""
         total_usage = {}
@@ -559,8 +538,8 @@ def get_context_settings(session_id: str):
     summarize_after_minutes = session.user_settings.get("summarize_after_minutes", 0)
     summarize_context_percent = session.user_settings.get("summarize_context_percent", 0)
 
-    rolling_window_type = session.user_settings.get("rolling_window_type", "messages")
-    rolling_window_limit = session.user_settings.get("rolling_window_limit", 10)
+    sliding_window_type = session.user_settings.get("sliding_window_type", "messages")
+    sliding_window_limit = session.user_settings.get("sliding_window_limit", 10)
 
     return jsonify({
         "context_optimization": optimization,
@@ -568,8 +547,8 @@ def get_context_settings(session_id: str):
         "summarize_after_n": summarize_after_n,
         "summarize_after_minutes": summarize_after_minutes,
         "summarize_context_percent": summarize_context_percent,
-        "rolling_window_type": rolling_window_type,
-        "rolling_window_limit": rolling_window_limit,
+        "sliding_window_type": sliding_window_type,
+        "sliding_window_limit": sliding_window_limit,
         "default_interval": config.default_messages_interval,
     })
 
@@ -587,7 +566,7 @@ def set_context_settings(session_id: str):
 
     if "context_optimization" in data:
         opt = data["context_optimization"]
-        if opt in ("none", "summarization", "rolling_window"):
+        if opt in ("none", "summarization", "sliding_window"):
             session.user_settings["context_optimization"] = opt
 
     if "summarization_enabled" in data:
@@ -617,18 +596,18 @@ def set_context_settings(session_id: str):
             percent = 100
         session.user_settings["summarize_context_percent"] = percent
 
-    if "rolling_window_type" in data:
-        wtype = data["rolling_window_type"]
+    if "sliding_window_type" in data:
+        wtype = data["sliding_window_type"]
         if wtype in ("messages", "tokens"):
-            session.user_settings["rolling_window_type"] = wtype
+            session.user_settings["sliding_window_type"] = wtype
 
-    if "rolling_window_limit" in data:
-        limit = int(data["rolling_window_limit"])
+    if "sliding_window_limit" in data:
+        limit = int(data["sliding_window_limit"])
         if limit < 1:
             limit = 1
         if limit > 1000:
             limit = 1000
-        session.user_settings["rolling_window_limit"] = limit
+        session.user_settings["sliding_window_limit"] = limit
 
     session_manager.save_session(session_id)
 

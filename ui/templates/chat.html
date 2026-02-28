@@ -69,7 +69,7 @@
                     <span>Суммаризация</span>
                 </label>
                 <label class="radio-label">
-                    <input type="radio" name="context-optimization" value="rolling_window">
+                    <input type="radio" name="context-optimization" value="sliding_window">
                     <span>Скользящее окно</span>
                 </label>
             </div>
@@ -110,16 +110,16 @@
             </div>
         </div>
 
-        <div id="rolling-window-settings" class="settings-group" style="display: none;">
+        <div id="sliding-window-settings" class="settings-group" style="display: none;">
             <div class="settings-section">
                 <label>Тип окна:</label>
                 <div class="radio-group">
                     <label class="radio-label">
-                        <input type="radio" name="rolling-window-type" value="messages">
+                        <input type="radio" name="sliding-window-type" value="messages">
                         <span>По сообщениям</span>
                     </label>
                     <label class="radio-label">
-                        <input type="radio" name="rolling-window-type" value="tokens">
+                        <input type="radio" name="sliding-window-type" value="tokens">
                         <span>По токенам</span>
                     </label>
                 </div>
@@ -128,7 +128,7 @@
             <div class="settings-section">
                 <label>
                     Лимит:
-                    <input type="number" id="rolling-window-limit" min="1" max="1000" value="10">
+                    <input type="number" id="sliding-window-limit" min="1" max="1000" value="10">
                 </label>
                 <p class="help-text">Количество сообщений или токенов в скользящем окне. Старые сообщения за пределами окна будут отключены.</p>
             </div>
@@ -1289,11 +1289,11 @@
                 document.getElementById('summarization-minutes').value = data.summarize_after_minutes || 0;
                 document.getElementById('summarization-percent').value = data.summarize_context_percent || 0;
                 
-                const wtype = data.rolling_window_type || 'messages';
-                document.querySelectorAll('input[name="rolling-window-type"]').forEach(el => {
+                const wtype = data.sliding_window_type || 'messages';
+                document.querySelectorAll('input[name="sliding-window-type"]').forEach(el => {
                     el.checked = el.value === wtype;
                 });
-                document.getElementById('rolling-window-limit').value = data.rolling_window_limit || 10;
+                document.getElementById('sliding-window-limit').value = data.sliding_window_limit || 10;
                 
                 document.getElementById('summarization-modal').dataset.panelIndex = panelIndex;
                 
@@ -1311,8 +1311,8 @@
     function updateContextSettingsVisibility(optimization) {
         document.getElementById('summarization-settings').style.display = 
             optimization === 'summarization' ? 'block' : 'none';
-        document.getElementById('rolling-window-settings').style.display = 
-            optimization === 'rolling_window' ? 'block' : 'none';
+        document.getElementById('sliding-window-settings').style.display = 
+            optimization === 'sliding_window' ? 'block' : 'none';
     }
 
     function closeSummarizationModal() {
@@ -1332,9 +1332,9 @@
         const minutes = parseInt(document.getElementById('summarization-minutes').value) || 0;
         const percent = parseInt(document.getElementById('summarization-percent').value) || 0;
         
-        const wtypeEl = document.querySelector('input[name="rolling-window-type"]:checked');
+        const wtypeEl = document.querySelector('input[name="sliding-window-type"]:checked');
         const wtype = wtypeEl ? wtypeEl.value : 'messages';
-        const wlimit = parseInt(document.getElementById('rolling-window-limit').value) || 10;
+        const wlimit = parseInt(document.getElementById('sliding-window-limit').value) || 10;
         
         fetch(`/api/sessions/${sessionId}/context-settings`, {
             method: 'POST',
@@ -1345,8 +1345,8 @@
                 summarize_after_n: interval,
                 summarize_after_minutes: minutes,
                 summarize_context_percent: percent,
-                rolling_window_type: wtype,
-                rolling_window_limit: wlimit
+                sliding_window_type: wtype,
+                sliding_window_limit: wlimit
             })
         })
             .then(r => r.json())
