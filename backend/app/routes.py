@@ -544,30 +544,39 @@ def toggle_message(session_id: str, index: int):
     return jsonify({"error": "Invalid message index"}), 400
 
 
-@api_bp.route("/sessions/<session_id>/summarization-settings", methods=["GET"])
+
+@api_bp.route("/sessions/<session_id>/context-settings", methods=["GET"])
 @require_auth
-def get_summarization_settings(session_id: str):
+def get_context_settings(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
         return jsonify({"error": "Session not found"}), 404
 
-    enabled = session.user_settings.get("summarization_enabled", False)
-    interval = session.user_settings.get("summarize_after_n", config.default_messages_interval)
-    minutes = session.user_settings.get("summarize_after_minutes", 0)
-    context_percent = session.user_settings.get("summarize_context_percent", 0)
+    optimization = session.user_settings.get("context_optimization", "none")
+    
+    summarization_enabled = session.user_settings.get("summarization_enabled", False)
+    summarize_after_n = session.user_settings.get("summarize_after_n", config.default_messages_interval)
+    summarize_after_minutes = session.user_settings.get("summarize_after_minutes", 0)
+    summarize_context_percent = session.user_settings.get("summarize_context_percent", 0)
+
+    rolling_window_type = session.user_settings.get("rolling_window_type", "messages")
+    rolling_window_limit = session.user_settings.get("rolling_window_limit", 10)
 
     return jsonify({
-        "summarization_enabled": enabled,
-        "summarize_after_n": interval,
-        "summarize_after_minutes": minutes,
-        "summarize_context_percent": context_percent,
+        "context_optimization": optimization,
+        "summarization_enabled": summarization_enabled,
+        "summarize_after_n": summarize_after_n,
+        "summarize_after_minutes": summarize_after_minutes,
+        "summarize_context_percent": summarize_context_percent,
+        "rolling_window_type": rolling_window_type,
+        "rolling_window_limit": rolling_window_limit,
         "default_interval": config.default_messages_interval,
     })
 
 
-@api_bp.route("/sessions/<session_id>/summarization-settings", methods=["POST"])
+@api_bp.route("/sessions/<session_id>/context-settings", methods=["POST"])
 @require_auth
-def set_summarization_settings(session_id: str):
+def set_context_settings(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
         return jsonify({"error": "Session not found"}), 404
@@ -575,6 +584,11 @@ def set_summarization_settings(session_id: str):
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
+
+    if "context_optimization" in data:
+        opt = data["context_optimization"]
+        if opt in ("none", "summarization", "rolling_window"):
+            session.user_settings["context_optimization"] = opt
 
     if "summarization_enabled" in data:
         session.user_settings["summarization_enabled"] = bool(data["summarization_enabled"])
@@ -591,7 +605,7 @@ def set_summarization_settings(session_id: str):
         minutes = int(data["summarize_after_minutes"])
         if minutes < 0:
             minutes = 0
-        if minutes > 10080:  # 1 week
+        if minutes > 10080:
             minutes = 10080
         session.user_settings["summarize_after_minutes"] = minutes
 
@@ -602,6 +616,19 @@ def set_summarization_settings(session_id: str):
         if percent > 100:
             percent = 100
         session.user_settings["summarize_context_percent"] = percent
+
+    if "rolling_window_type" in data:
+        wtype = data["rolling_window_type"]
+        if wtype in ("messages", "tokens"):
+            session.user_settings["rolling_window_type"] = wtype
+
+    if "rolling_window_limit" in data:
+        limit = int(data["rolling_window_limit"])
+        if limit < 1:
+            limit = 1
+        if limit > 1000:
+            limit = 1000
+        session.user_settings["rolling_window_limit"] = limit
 
     session_manager.save_session(session_id)
 

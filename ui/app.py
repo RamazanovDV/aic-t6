@@ -308,9 +308,9 @@ def get_session(session_id: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
-@ui_bp.route("/api/sessions/<session_id>/summarization-settings", methods=["GET"])
-def get_summarization_settings(session_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/summarization-settings"
+@ui_bp.route("/api/sessions/<session_id>/context-settings", methods=["GET"])
+def get_context_settings(session_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/context-settings"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -319,10 +319,13 @@ def get_summarization_settings(session_id: str):
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 404:
             return jsonify({
+                "context_optimization": "none",
                 "summarization_enabled": False,
                 "summarize_after_n": 10,
                 "summarize_after_minutes": 0,
                 "summarize_context_percent": 0,
+                "rolling_window_type": "messages",
+                "rolling_window_limit": 10,
                 "default_interval": 10
             })
         response.raise_for_status()
@@ -331,13 +334,13 @@ def get_summarization_settings(session_id: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
-@ui_bp.route("/api/sessions/<session_id>/summarization-settings", methods=["POST"])
-def set_summarization_settings(session_id: str):
+@ui_bp.route("/api/sessions/<session_id>/context-settings", methods=["POST"])
+def set_context_settings(session_id: str):
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    url = f"{ui_config.backend_url}/sessions/{session_id}/summarization-settings"
+    url = f"{ui_config.backend_url}/sessions/{session_id}/context-settings"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "Content-Type": "application/json",

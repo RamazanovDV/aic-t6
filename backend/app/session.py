@@ -112,10 +112,22 @@ class Session:
         self.updated_at = datetime.now()
 
     def get_messages_for_llm(self) -> list[Message]:
-        """Вернуть сообщения для LLM: summary + последний user message (после summary)"""
+        """Вернуть сообщения для LLM с учётом оптимизации контекста"""
         if not self.messages:
             return []
 
+        optimization = self.user_settings.get("context_optimization", "none")
+
+        if optimization == "rolling_window":
+            return self._get_messages_rolling_window()
+
+        if optimization == "summarization":
+            return self._get_messages_with_summarization()
+
+        return [m for m in self.messages if not m.disabled]
+
+    def _get_messages_with_summarization(self) -> list[Message]:
+        """Сообщения для LLM с суммаризацией (существующая логика)"""
         last_summary_idx = None
         for i in range(len(self.messages) - 1, -1, -1):
             if self.messages[i].role == "summary":
@@ -125,16 +137,71 @@ class Session:
         if last_summary_idx is None:
             return [m for m in self.messages if not m.disabled]
 
-        # summary всегда первым
         result = [self.messages[last_summary_idx]]
-        
-        # Ищем последний user message ПОСЛЕ summary
+
         for i in range(len(self.messages) - 1, last_summary_idx, -1):
             if self.messages[i].role == "user" and not self.messages[i].disabled:
                 result.append(self.messages[i])
                 break
 
         return result
+
+    def _get_messages_rolling_window(self) -> list[Message]:
+        """Сообщения для LLM со скользящим окном"""
+        window_type = self.user_settings.get("rolling_window_type", "messages")
+        window_limit = self.user_settings.get("rolling_window_limit", 10)
+
+        active_messages = [m for m in self.messages if not m.disabled and m.role in ("user", "assistant", "system")]
+
+        if not active_messages:
+            return []
+
+        if window_type == "messages":
+            window_messages = active_messages[-window_limit:]
+        else:
+            window_messages = self._get_messages_by_token_limit(active_messages, window_limit)
+
+        self._auto_disable_outside_window(window_messages)
+
+        return window_messages
+
+    def _get_messages_by_token_limit(self, messages: list[Message], token_limit: int) -> list[Message]:
+        """Выбрать сообщения в пределах лимита токенов"""
+        result = []
+        total_tokens = 0
+
+        for msg in reversed(messages):
+            msg_tokens = msg.usage.get("total_tokens", len(msg.content) // 4)
+            if total_tokens + msg_tokens <= token_limit:
+                result.insert(0, msg)
+                total_tokens += msg_tokens
+            else:
+                break
+
+        if not result and messages:
+            result = [messages[-1]]
+
+        return result
+
+    def _auto_disable_outside_window(self, window_messages: list[Message]) -> None:
+        """Автоматически отключить сообщения за пределами окна"""
+        disabled_count = 0
+
+        active_messages = [
+            m for m in self.messages 
+            if not m.disabled 
+            and m.role in ("user", "assistant", "system")
+            and m.branch_id == self.current_branch
+        ]
+        window_set = set(id(m) for m in window_messages)
+
+        for msg in active_messages:
+            if id(msg) not in window_set:
+                msg.disabled = True
+                disabled_count += 1
+
+        if disabled_count > 0:
+            self.updated_at = datetime.now()
 
     def get_active_message_count(self) -> int:
         return sum(1 for m in self.messages if m.role in ("user", "assistant"))

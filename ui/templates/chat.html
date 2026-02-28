@@ -55,38 +55,83 @@
 
 <div id="summarization-modal" class="modal" style="display: none;">
     <div class="modal-content">
-        <h3>Настройки суммаризации</h3>
+        <h3>Настройки оптимизации контекста</h3>
         
         <div class="settings-section">
-            <label class="checkbox-label">
-                <input type="checkbox" id="summarization-enabled">
-                <span>Включить суммаризацию</span>
-            </label>
-            <p class="help-text">При включённой суммаризации, будет создаваться краткое резюме диалога по заданным условиям.</p>
+            <label>Тип оптимизации:</label>
+            <div class="radio-group">
+                <label class="radio-label">
+                    <input type="radio" name="context-optimization" value="none" checked>
+                    <span>Нет</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="context-optimization" value="summarization">
+                    <span>Суммаризация</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="context-optimization" value="rolling_window">
+                    <span>Скользящее окно</span>
+                </label>
+            </div>
+            <p class="help-text">Выберите способ оптимизации контекста: суммаризация сжимает старые сообщения, скользящее окно отбрасывает их.</p>
         </div>
 
-        <div class="settings-section">
-            <label>
-                По количеству сообщений:
-                <input type="number" id="summarization-interval" min="0" max="100" value="10">
-            </label>
-            <p class="help-text">Количество сообщений пользователя после последнего summary для запуска (0 - отключено).</p>
+        <div id="summarization-settings" class="settings-group" style="display: none;">
+            <div class="settings-section">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="summarization-enabled">
+                    <span>Включить суммаризацию</span>
+                </label>
+                <p class="help-text">При включённой суммаризации, будет создаваться краткое резюме диалога по заданным условиям.</p>
+            </div>
+
+            <div class="settings-section">
+                <label>
+                    По количеству сообщений:
+                    <input type="number" id="summarization-interval" min="0" max="100" value="10">
+                </label>
+                <p class="help-text">Количество сообщений пользователя после последнего summary для запуска (0 - отключено).</p>
+            </div>
+
+            <div class="settings-section">
+                <label>
+                    По времени (минут):
+                    <input type="number" id="summarization-minutes" min="0" max="10080" value="0">
+                </label>
+                <p class="help-text">Возраст сообщений в минутах для запуска суммаризации (0 - отключено, 60 = час, 1440 = день).</p>
+            </div>
+
+            <div class="settings-section">
+                <label>
+                    По объёму контекста (%):
+                    <input type="number" id="summarization-percent" min="0" max="100" value="0">
+                </label>
+                <p class="help-text">Процент от контекстного окна модели для запуска суммаризации (0 - отключено, 75 = 75%).</p>
+            </div>
         </div>
 
-        <div class="settings-section">
-            <label>
-                По времени (минут):
-                <input type="number" id="summarization-minutes" min="0" max="10080" value="0">
-            </label>
-            <p class="help-text">Возраст сообщений в минутах для запуска суммаризации (0 - отключено, 60 = час, 1440 = день).</p>
-        </div>
+        <div id="rolling-window-settings" class="settings-group" style="display: none;">
+            <div class="settings-section">
+                <label>Тип окна:</label>
+                <div class="radio-group">
+                    <label class="radio-label">
+                        <input type="radio" name="rolling-window-type" value="messages">
+                        <span>По сообщениям</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="rolling-window-type" value="tokens">
+                        <span>По токенам</span>
+                    </label>
+                </div>
+            </div>
 
-        <div class="settings-section">
-            <label>
-                По объёму контекста (%):
-                <input type="number" id="summarization-percent" min="0" max="100" value="0">
-            </label>
-            <p class="help-text">Процент от контекстного окна модели для запуска суммаризации (0 - отключено, 75 = 75%).</p>
+            <div class="settings-section">
+                <label>
+                    Лимит:
+                    <input type="number" id="rolling-window-limit" min="1" max="1000" value="10">
+                </label>
+                <p class="help-text">Количество сообщений или токенов в скользящем окне. Старые сообщения за пределами окна будут отключены.</p>
+            </div>
         </div>
 
         <div class="modal-actions">
@@ -1231,18 +1276,43 @@
     function openSummarizationModal(panelIndex = 0) {
         const sessionId = panels[panelIndex] ? panels[panelIndex].sessionId : 'default';
         
-        fetch(`/api/sessions/${sessionId}/summarization-settings`)
+        fetch(`/api/sessions/${sessionId}/context-settings`)
             .then(r => r.json())
             .then(data => {
+                const opt = data.context_optimization || 'none';
+                document.querySelectorAll('input[name="context-optimization"]').forEach(el => {
+                    el.checked = el.value === opt;
+                });
+                
                 document.getElementById('summarization-enabled').checked = data.summarization_enabled;
-                document.getElementById('summarization-interval').value = data.summarize_after_n || 0;
+                document.getElementById('summarization-interval').value = data.summarize_after_n || 10;
                 document.getElementById('summarization-minutes').value = data.summarize_after_minutes || 0;
                 document.getElementById('summarization-percent').value = data.summarize_context_percent || 0;
+                
+                const wtype = data.rolling_window_type || 'messages';
+                document.querySelectorAll('input[name="rolling-window-type"]').forEach(el => {
+                    el.checked = el.value === wtype;
+                });
+                document.getElementById('rolling-window-limit').value = data.rolling_window_limit || 10;
+                
                 document.getElementById('summarization-modal').dataset.panelIndex = panelIndex;
+                
+                updateContextSettingsVisibility(opt);
             })
-            .catch(err => console.error('Failed to load summarization settings:', err));
+            .catch(err => console.error('Failed to load context settings:', err));
+        
+        document.querySelectorAll('input[name="context-optimization"]').forEach(el => {
+            el.onchange = () => updateContextSettingsVisibility(el.value);
+        });
         
         document.getElementById('summarization-modal').style.display = 'flex';
+    }
+
+    function updateContextSettingsVisibility(optimization) {
+        document.getElementById('summarization-settings').style.display = 
+            optimization === 'summarization' ? 'block' : 'none';
+        document.getElementById('rolling-window-settings').style.display = 
+            optimization === 'rolling_window' ? 'block' : 'none';
     }
 
     function closeSummarizationModal() {
@@ -1254,26 +1324,36 @@
         const panelIndex = parseInt(modal.dataset.panelIndex) || 0;
         const sessionId = panels[panelIndex] ? panels[panelIndex].sessionId : 'default';
         
+        const optimizationEl = document.querySelector('input[name="context-optimization"]:checked');
+        const optimization = optimizationEl ? optimizationEl.value : 'none';
+        
         const enabled = document.getElementById('summarization-enabled').checked;
-        const interval = parseInt(document.getElementById('summarization-interval').value) || 0;
+        const interval = parseInt(document.getElementById('summarization-interval').value) || 10;
         const minutes = parseInt(document.getElementById('summarization-minutes').value) || 0;
         const percent = parseInt(document.getElementById('summarization-percent').value) || 0;
         
-        fetch(`/api/sessions/${sessionId}/summarization-settings`, {
+        const wtypeEl = document.querySelector('input[name="rolling-window-type"]:checked');
+        const wtype = wtypeEl ? wtypeEl.value : 'messages';
+        const wlimit = parseInt(document.getElementById('rolling-window-limit').value) || 10;
+        
+        fetch(`/api/sessions/${sessionId}/context-settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                context_optimization: optimization,
                 summarization_enabled: enabled,
                 summarize_after_n: interval,
                 summarize_after_minutes: minutes,
-                summarize_context_percent: percent
+                summarize_context_percent: percent,
+                rolling_window_type: wtype,
+                rolling_window_limit: wlimit
             })
         })
             .then(r => r.json())
             .then(data => {
                 closeSummarizationModal();
             })
-            .catch(err => console.error('Failed to save summarization settings:', err));
+            .catch(err => console.error('Failed to save context settings:', err));
     }
 
     function triggerManualSummarize() {
