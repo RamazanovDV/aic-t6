@@ -1568,6 +1568,8 @@
             
             if (response.ok) {
                 const checkpoint = await response.json();
+                await loadPanelSettings(panelIndex);
+                await loadPanelMessages(panelIndex);
                 alert(`Чекпоинт создан: ${checkpoint.name}`);
             } else {
                 const err = await response.json();
@@ -1639,7 +1641,7 @@
             html += `<span class="tree-info">${node.message_count || 0} сообщений${isCurrent}</span>`;
             
             if (!node.is_current) {
-                html += `<button class="btn btn-small" onclick="switchToBranch('${sessionId}', '${node.id}', ${indent})">Переключиться</button>`;
+                html += `<button class="btn btn-small" onclick="switchToBranch('${sessionId}', '${node.id}')">Переключиться</button>`;
             }
             html += `<button class="btn btn-small" onclick="renameBranch('${sessionId}', '${node.id}', '${node.name}')">✎</button>`;
             if (node.id !== 'main') {
@@ -1670,13 +1672,18 @@
     }
 
     async function switchToBranch(sessionId, branchId) {
+        const modal = document.getElementById('tree-modal');
+        const panelIndex = parseInt(modal?.dataset?.panelIndex) || 0;
+        
         try {
             const response = await fetch(`/api/sessions/${sessionId}/branches/${branchId}/switch`, {
                 method: 'POST',
             });
             
             if (response.ok) {
-                location.reload();
+                closeTreeModal();
+                await loadPanelMessages(panelIndex);
+                await loadPanelSettings(panelIndex);
             } else {
                 const err = await response.json();
                 alert('Ошибка: ' + (err.error || 'Unknown'));
@@ -1688,6 +1695,9 @@
     }
 
     async function createBranchFromCheckpoint(sessionId, checkpointId) {
+        const modal = document.getElementById('tree-modal');
+        const panelIndex = parseInt(modal?.dataset?.panelIndex) || 0;
+        
         try {
             const response = await fetch(`/api/sessions/${sessionId}/checkpoints/${checkpointId}/branch`, {
                 method: 'POST',
@@ -1698,7 +1708,7 @@
             if (response.ok) {
                 const branch = await response.json();
                 alert(`Ветка создана: ${branch.name}`);
-                location.reload();
+                showTreeModal(panelIndex);
             } else {
                 const err = await response.json();
                 alert('Ошибка: ' + (err.error || 'Unknown'));
@@ -1710,6 +1720,9 @@
     }
 
     async function renameBranch(sessionId, branchId, currentName) {
+        const modal = document.getElementById('tree-modal');
+        const panelIndex = parseInt(modal?.dataset?.panelIndex) || 0;
+        
         const newName = prompt('Новое имя ветки:', currentName);
         if (!newName || newName === currentName) return;
         
@@ -1721,7 +1734,7 @@
             });
             
             if (response.ok) {
-                showTreeModal(0);
+                showTreeModal(panelIndex);
             } else {
                 const err = await response.json();
                 alert('Ошибка: ' + (err.error || 'Unknown'));
@@ -1733,6 +1746,9 @@
     }
 
     async function deleteBranch(sessionId, branchId) {
+        const modal = document.getElementById('tree-modal');
+        const panelIndex = parseInt(modal?.dataset?.panelIndex) || 0;
+        
         if (!confirm('Удалить ветку? Все сообщения этой ветки будут потеряны.')) return;
         
         try {
@@ -1741,7 +1757,7 @@
             });
             
             if (response.ok) {
-                showTreeModal(0);
+                showTreeModal(panelIndex);
             } else {
                 const err = await response.json();
                 alert('Ошибка: ' + (err.error || 'Unknown'));
@@ -1753,6 +1769,9 @@
     }
 
     async function renameCheckpoint(sessionId, checkpointId, currentName) {
+        const modal = document.getElementById('tree-modal');
+        const panelIndex = parseInt(modal?.dataset?.panelIndex) || 0;
+        
         const newName = prompt('Новое имя чекпоинта:', currentName);
         if (!newName || newName === currentName) return;
         
@@ -1764,7 +1783,7 @@
             });
             
             if (response.ok) {
-                showTreeModal(0);
+                showTreeModal(panelIndex);
             } else {
                 const err = await response.json();
                 alert('Ошибка: ' + (err.error || 'Unknown'));
@@ -1776,6 +1795,9 @@
     }
 
     async function deleteCheckpoint(sessionId, checkpointId) {
+        const modal = document.getElementById('tree-modal');
+        const panelIndex = parseInt(modal?.dataset?.panelIndex) || 0;
+        
         if (!confirm('Удалить чекпоинт? Все ответвлённые ветки также будут удалены.')) return;
         
         try {
@@ -1784,7 +1806,7 @@
             });
             
             if (response.ok) {
-                showTreeModal(0);
+                showTreeModal(panelIndex);
             } else {
                 const err = await response.json();
                 alert('Ошибка: ' + (err.error || 'Unknown'));
