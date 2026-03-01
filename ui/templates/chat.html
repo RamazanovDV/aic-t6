@@ -236,9 +236,7 @@
 
                 <div class="branch-panel">
                     <span class="panel-label">Ветка:</span>
-                    <select class="branch-select panel-branch-select" data-panel="${index}" onchange="onPanelBranchChange(${index}, this.value)">
-                        <option value="main">main</option>
-                    </select>
+                    <span class="branch-name panel-branch-name" data-panel="${index}" onclick="showTreeModal(${index})">main</span>
                     <button class="btn btn-small" onclick="createCheckpointPanel(${index})" title="Создать чекпоинт">📸</button>
                     <button class="btn btn-small" onclick="showTreeModal(${index})" title="Дерево веток">🌳</button>
                 </div>
@@ -534,28 +532,18 @@
 
     async function loadPanelBranches(panelIndex) {
         const panel = panels[panelIndex];
-        const branchSelect = document.querySelector(`.panel-branch-select[data-panel="${panelIndex}"]`);
+        const branchName = document.querySelector(`.panel-branch-name[data-panel="${panelIndex}"]`);
         
-        if (!branchSelect) return;
+        if (!branchName) return;
 
-        branchSelect.innerHTML = '';
-        
+        let currentBranchName = 'main';
         if (panel.branches && panel.branches.length > 0) {
-            panel.branches.forEach(branch => {
-                const option = document.createElement('option');
-                option.value = branch.id;
-                option.textContent = branch.name + (branch.id === panel.currentBranch ? ' (текущая)' : '');
-                if (branch.id === panel.currentBranch) {
-                    option.selected = true;
-                }
-                branchSelect.appendChild(option);
-            });
-        } else {
-            const option = document.createElement('option');
-            option.value = 'main';
-            option.textContent = 'main';
-            branchSelect.appendChild(option);
+            const current = panel.branches.find(b => b.id === panel.currentBranch);
+            if (current) {
+                currentBranchName = current.name;
+            }
         }
+        branchName.textContent = currentBranchName;
     }
 
     async function loadPanelModels(panelIndex) {
@@ -1625,12 +1613,21 @@
 
         const name = prompt('Имя чекпоинта (оставьте пустым для автоимени):');
         
+        const indicator = document.createElement('div');
+        indicator.className = 'summarizing-indicator';
+        indicator.id = `checkpoint-indicator-${panelIndex}`;
+        indicator.textContent = 'Создаю чекпоинт...';
+        panel.messagesContainer.appendChild(indicator);
+        panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+        
         try {
             const response = await fetch(`/api/sessions/${panel.sessionId}/checkpoints`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: name || undefined })
             });
+            
+            indicator.remove();
             
             if (response.ok) {
                 const checkpoint = await response.json();
@@ -1642,6 +1639,7 @@
                 alert('Ошибка: ' + (err.error || 'Unknown'));
             }
         } catch (err) {
+            indicator.remove();
             console.error('Failed to create checkpoint:', err);
             alert('Ошибка при создании чекпоинта');
         }

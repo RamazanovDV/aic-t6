@@ -685,7 +685,10 @@ def create_checkpoint(session_id: str):
     data = request.get_json() or {}
     name = data.get("name")
 
-    checkpoint = session.create_checkpoint(name)
+    try:
+        checkpoint = session.create_checkpoint(name)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 500
     session_manager.save_session(session_id)
 
     return jsonify({

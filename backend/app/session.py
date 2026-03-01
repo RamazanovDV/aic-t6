@@ -12,6 +12,7 @@ class Checkpoint:
     name: str
     branch_id: str
     message_count: int
+    summary: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
@@ -331,8 +332,9 @@ class Session:
         return [m for m in self.messages if m.branch_id == branch_id]
 
     def create_checkpoint(self, name: str | None = None) -> Checkpoint:
-        """Создать чекпоинт на текущей ветке"""
+        """Создать чекпоинт на текущей ветке с суммаризацией"""
         import uuid
+        from app import summarizer
 
         self._ensure_main_branch()
         branch = self.get_branch(self.current_branch)
@@ -340,11 +342,20 @@ class Session:
             branch = self.branches[0]
 
         current_messages = self.get_current_branch_messages()
+        
+        summary = None
+        if current_messages:
+            try:
+                summary, _ = summarizer.summarize_messages(current_messages)
+            except Exception as e:
+                raise ValueError(f"Failed to create summary: {str(e)}")
+        
         checkpoint = Checkpoint(
             id=str(uuid.uuid4())[:8],
             name=name or f"v{len(self.checkpoints) + 1}",
             branch_id=branch.id,
             message_count=len(current_messages),
+            summary=summary,
         )
         self.checkpoints.append(checkpoint)
         self.updated_at = datetime.now()
@@ -399,11 +410,14 @@ class Session:
         )
         self.branches.append(new_branch)
 
-        for msg in self.messages:
-            if msg.branch_id == checkpoint.branch_id:
-                msg_idx = self.messages.index(msg)
-                if msg_idx < checkpoint.message_count:
-                    msg.branch_id = new_branch.id
+        if checkpoint.summary:
+            summary_msg = Message(
+                role="system",
+                content=checkpoint.summary,
+                branch_id=new_branch.id,
+                usage={},
+            )
+            self.messages.append(summary_msg)
 
         self.updated_at = datetime.now()
         return new_branch
@@ -616,6 +630,7 @@ class SessionManager:
                         name=cp["name"],
                         branch_id=cp["branch_id"],
                         message_count=cp["message_count"],
+                        summary=cp.get("summary"),
                         created_at=datetime.fromisoformat(cp["created_at"]) if cp.get("created_at") else datetime.now(),
                     )
                     for cp in data.get("checkpoints", [])
@@ -715,6 +730,7 @@ class SessionManager:
                     name=cp["name"],
                     branch_id=cp["branch_id"],
                     message_count=cp["message_count"],
+                    summary=cp.get("summary"),
                     created_at=datetime.fromisoformat(cp["created_at"]) if cp.get("created_at") else datetime.now(),
                 )
                 for cp in data.get("checkpoints", [])

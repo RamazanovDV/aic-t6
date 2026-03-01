@@ -60,6 +60,7 @@ class FileStorage:
                     "name": cp.name,
                     "branch_id": cp.branch_id,
                     "message_count": cp.message_count,
+                    "summary": cp.summary,
                     "created_at": cp.created_at.isoformat(),
                 }
                 for cp in session.checkpoints
