@@ -1267,9 +1267,19 @@
         // Check if this is a summary debug (has summarized_messages)
         const isSummary = debugData && debugData.summarized_messages;
         
+        // Check for sticky_notes facts
+        const hasFacts = debugData && (debugData.facts || debugData.raw_facts);
+        
         if (isSummary) {
             // Show all summary debug info
             document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
+            document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
+        } else if (hasFacts) {
+            // Show facts for sticky_notes
+            const factsInfo = {};
+            if (debugData.raw_facts) factsInfo.raw_facts = debugData.raw_facts;
+            if (debugData.facts) factsInfo.facts = debugData.facts;
+            document.getElementById('debug-json').textContent = JSON.stringify(factsInfo, null, 2);
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
         } else {
             // Standard debug for LLM calls
