@@ -66,6 +66,7 @@ class FileStorage:
                 for cp in session.checkpoints
             ],
             "current_branch": session.current_branch,
+            "facts": session.facts,
         }
 
         with open(session_file, "w") as f:

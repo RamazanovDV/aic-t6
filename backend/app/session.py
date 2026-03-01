@@ -40,6 +40,7 @@ class Session:
     branches: list[Branch] = field(default_factory=list)
     checkpoints: list[Checkpoint] = field(default_factory=list)
     current_branch: str = "main"
+    facts: dict[str, str] = field(default_factory=dict)
 
     def _ensure_main_branch(self) -> None:
         """Ensure main branch exists"""
@@ -61,6 +62,21 @@ class Session:
             self.input_tokens += usage.get("input_tokens", 0)
             self.output_tokens += usage.get("output_tokens", 0)
         self.updated_at = datetime.now()
+
+    def update_facts(self, facts_text: str) -> None:
+        """Обновить facts из текста, полученного от модели"""
+        if not facts_text:
+            return
+
+        import json
+
+        try:
+            facts_dict = json.loads(facts_text)
+            if isinstance(facts_dict, dict):
+                self.facts = facts_dict
+                self.updated_at = datetime.now()
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     def add_error_message(self, content: str, debug: dict | None = None, model: str | None = None) -> None:
         msg = Message(role="error", content=content, usage={}, debug=debug, model=model, branch_id=self.current_branch)
@@ -125,6 +141,9 @@ class Session:
         if optimization == "summarization":
             return self._get_messages_with_summarization()
 
+        if optimization == "sticky_notes":
+            return self._get_messages_sticky_notes()
+
         return [m for m in self.messages if not m.disabled]
 
     def _get_messages_with_summarization(self) -> list[Message]:
@@ -146,6 +165,19 @@ class Session:
                 break
 
         return result
+
+    def _get_messages_sticky_notes(self) -> list[Message]:
+        """Сообщения для LLM со sticky notes (факты + N последних сообщений)"""
+        sticky_limit = self.user_settings.get("sticky_notes_limit", 6)
+
+        active_messages = [m for m in self.messages if not m.disabled and m.role in ("user", "assistant", "system")]
+
+        if not active_messages:
+            return []
+
+        last_n_messages = active_messages[-sticky_limit:] if len(active_messages) > sticky_limit else active_messages
+
+        return last_n_messages
 
     def _get_messages_sliding_window(self) -> list[Message]:
         """Сообщения для LLM со скользящим окном"""
@@ -576,6 +608,7 @@ class Session:
         self.total_tokens = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.facts = {}
         self.updated_at = datetime.now()
 
     def clear_debug(self) -> None:
@@ -650,6 +683,7 @@ class SessionManager:
                     branches=branches,
                     checkpoints=checkpoints,
                     current_branch=data.get("current_branch", "main"),
+                    facts=data.get("facts", {}),
                 )
                 session._ensure_main_branch()
                 self._sessions[session_id] = session
@@ -750,6 +784,7 @@ class SessionManager:
                 branches=branches,
                 checkpoints=checkpoints,
                 current_branch=data.get("current_branch", "main"),
+                facts=data.get("facts", {}),
             )
             session._ensure_main_branch()
             self._sessions[session_id] = session

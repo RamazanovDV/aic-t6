@@ -72,8 +72,12 @@
                     <input type="radio" name="context-optimization" value="sliding_window">
                     <span>Скользящее окно</span>
                 </label>
+                <label class="radio-label">
+                    <input type="radio" name="context-optimization" value="sticky_notes">
+                    <span>Sticky Notes</span>
+                </label>
             </div>
-            <p class="help-text">Выберите способ оптимизации контекста: суммаризация сжимает старые сообщения, скользящее окно отбрасывает их.</p>
+            <p class="help-text">Выберите способ оптимизации контекста: суммаризация сжимает старые сообщения, скользящее окно отбрасывает их, sticky notes сохраняет ключевые факты.</p>
         </div>
 
         <div id="summarization-settings" class="settings-group" style="display: none;">
@@ -131,6 +135,16 @@
                     <input type="number" id="sliding-window-limit" min="1" max="1000" value="10">
                 </label>
                 <p class="help-text">Количество сообщений или токенов в скользящем окне. Старые сообщения за пределами окна будут отключены.</p>
+            </div>
+        </div>
+
+        <div id="sticky-notes-settings" class="settings-group" style="display: none;">
+            <div class="settings-section">
+                <label>
+                    Количество последних сообщений:
+                    <input type="number" id="sticky-notes-limit" min="1" max="50" value="6">
+                </label>
+                <p class="help-text">Количество последних сообщений, которые будут отправляться модели вместе с сохранёнными фактами.</p>
             </div>
         </div>
 
@@ -1349,6 +1363,8 @@
                 });
                 document.getElementById('sliding-window-limit').value = data.sliding_window_limit || 10;
                 
+                document.getElementById('sticky-notes-limit').value = data.sticky_notes_limit || 6;
+                
                 document.getElementById('summarization-modal').dataset.panelIndex = panelIndex;
                 
                 updateContextSettingsVisibility(opt);
@@ -1367,6 +1383,8 @@
             optimization === 'summarization' ? 'block' : 'none';
         document.getElementById('sliding-window-settings').style.display = 
             optimization === 'sliding_window' ? 'block' : 'none';
+        document.getElementById('sticky-notes-settings').style.display = 
+            optimization === 'sticky_notes' ? 'block' : 'none';
     }
 
     function closeSummarizationModal() {
@@ -1390,6 +1408,8 @@
         const wtype = wtypeEl ? wtypeEl.value : 'messages';
         const wlimit = parseInt(document.getElementById('sliding-window-limit').value) || 10;
         
+        const stickyLimit = parseInt(document.getElementById('sticky-notes-limit').value) || 6;
+        
         fetch(`/api/sessions/${sessionId}/context-settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1400,7 +1420,8 @@
                 summarize_after_minutes: minutes,
                 summarize_context_percent: percent,
                 sliding_window_type: wtype,
-                sliding_window_limit: wlimit
+                sliding_window_limit: wlimit,
+                sticky_notes_limit: stickyLimit
             })
         })
             .then(r => r.json())

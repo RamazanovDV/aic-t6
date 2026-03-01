@@ -63,10 +63,13 @@ cd backend && pytest
 cd ui && pytest
 
 # Run single test file
-pytest path/to/test_file.py
+pytest backend/tests/test_session.py
+
+# Run specific test function
+pytest backend/tests/test_session.py::test_get_messages_for_llm
 
 # Run tests matching pattern
-pytest -k test_name
+pytest -k "test_name"
 
 # Run with verbose output
 pytest -v
@@ -80,9 +83,12 @@ Tests should be placed in `tests/` directories within each component (e.g., `bac
 ### Linting & Formatting
 ```bash
 ruff check .           # Lint
-ruff check --fix .    # Auto-fix
+ruff check --fix .     # Auto-fix
 black .                # Format
 mypy .                 # Type check
+
+# Lint specific file
+ruff check backend/app/routes.py
 ```
 
 ## Code Style
@@ -109,7 +115,11 @@ from typing import Optional
 def process(items: list[str], flag: Optional[bool] = None) -> None: ...
 ```
 
-### Naming Conventions - **Variables/functions**: `snake_case`, **Classes**: `PascalCase`, **Constants**: `UPPER_SNAKE_CASE`, **Private methods**: prefix with `_`
+### Naming Conventions
+- **Variables/functions**: `snake_case`
+- **Classes**: `PascalCase`
+- **Constants**: `UPPER_SNAKE_CASE`
+- **Private methods**: prefix with `_`
 
 ### Error Handling
 ```python
@@ -160,21 +170,19 @@ def chat(message: str): """Send a message""" ...
 {% block content %}{{ content|safe }}{% endblock %}
 ```
 
-### JavaScript (chat.html)
+### JavaScript
 - Use ES6+ syntax (async/await, arrow functions, template literals)
 - Use `const` by default, `let` when needed, avoid `var`
 - Always use strict equality (`===` and `!==`)
 - Use meaningful variable names
 - Prefer async/await over raw promises
-- Use backticks for string interpolation: `` `value: ${x}` ``
-- Add event listeners via `addEventListener`, not inline onclick unless necessary
+- Add event listeners via `addEventListener`, not inline onclick
 
 Example:
 ```javascript
 async function loadPanelMessages(panelIndex) {
     const panel = panels[panelIndex];
     if (!panel?.sessionId) return;
-    
     try {
         const response = await fetch(`/api/sessions/${panel.sessionId}/messages`);
         const data = await response.json();
@@ -185,10 +193,29 @@ async function loadPanelMessages(panelIndex) {
 }
 ```
 
-### Debug Mode
+## Context Optimization
+
+T6 supports several context optimization strategies:
+
+1. **none** - No optimization, all messages sent to LLM
+2. **summarization** - Compresses old messages into summaries
+3. **sliding_window** - Keeps only N recent messages
+4. **sticky_notes** - Extracts key facts (name, preferences, goals) and sends them with N recent messages
+
+Configure via API: `POST /api/sessions/{id}/context-settings`
+
+## Session Management
+
+- Sessions stored in `data/sessions/` as JSON files
+- Use `session_manager` from `app/session.py` to manage session history
+- Session data includes: messages, facts (key-value for sticky_notes), branches, checkpoints
+
+## Debug Mode
+
 The UI includes a debug toggle to view raw LLM requests/responses. Debug data is stored in session files and can be cleared via API or UI.
 
-### Configuration
+## Configuration
+
 - Store sensitive data in YAML config files (gitignored)
 - Use `.gitignore` to exclude `config.yaml`, `venv/`, `data/`
 
@@ -210,7 +237,7 @@ llm:
 
 **Add API Endpoint** - Add route in `backend/app/routes.py`, use `@require_auth` if needed, return JSON.
 
-**Session Management** - Sessions are stored in `data/` directory. Use `session_manager` from `app/session.py` to manage session history.
+**Add Context File** - Create `.md` file in `data/context/`, enable in admin panel.
 
 ## Git Practices
 

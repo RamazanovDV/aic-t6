@@ -1,4 +1,5 @@
 import json
+import re
 
 import requests
 from flask import Blueprint, jsonify, render_template, request, Response
@@ -12,6 +13,39 @@ from app import summarizer
 
 api_bp = Blueprint("api", __name__)
 admin_bp = Blueprint("admin", __name__)
+
+
+def get_sticky_notes_prompt(facts: dict[str, str]) -> str:
+    """Сформировать промпт с фактами для sticky notes"""
+    facts_extraction = config.get_context_file("FACTS_EXTRACTION.md") or ""
+    
+    result = ""
+    
+    if facts_extraction:
+        result += f"\n\n{facts_extraction}\n"
+    
+    if facts:
+        facts_text = "\nТекущие факты о пользователе и сессии:\n"
+        for key, value in facts.items():
+            facts_text += f"- {key}: {value}\n"
+        result += facts_text
+    
+    return result
+
+
+def extract_facts_from_response(content: str) -> str | None:
+    """Извлечь JSON с фактами из ответа модели"""
+    json_pattern = r"```json\s*([\s\S]*?)\s*```"
+    match = re.search(json_pattern, content)
+    if match:
+        return match.group(1).strip()
+
+    json_pattern_short = r"^\s*\{.*\}\s*$"
+    for line in content.split("\n"):
+        if re.match(json_pattern_short, line.strip()):
+            return line.strip()
+
+    return None
 
 
 @admin_bp.route("/")
@@ -133,6 +167,9 @@ def chat():
 
     system_prompt = get_system_prompt()
 
+    if session.user_settings.get("context_optimization") == "sticky_notes":
+        system_prompt += get_sticky_notes_prompt(session.facts)
+
     try:
         llm_messages = session.get_messages_for_llm()
         session_manager.save_session(session_id)
@@ -158,6 +195,12 @@ def chat():
         }
 
     session.add_assistant_message(response.content, response.usage, debug=debug_info, model=response.model)
+
+    if session.user_settings.get("context_optimization") == "sticky_notes":
+        facts_json = extract_facts_from_response(response.content)
+        if facts_json:
+            session.update_facts(facts_json)
+
     session_manager.save_session(session_id)
 
     disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
@@ -268,6 +311,9 @@ def chat_stream():
 
         system_prompt = get_system_prompt()
 
+        if session.user_settings.get("context_optimization") == "sticky_notes":
+            system_prompt += get_sticky_notes_prompt(session.facts)
+
         # Используем get_messages_for_llm() для поддержки скользящего окна
         llm_messages = session.get_messages_for_llm()
         session_manager.save_session(session_id)
@@ -329,6 +375,12 @@ def chat_stream():
                 # При суммаризации user message ещё не был добавлен
                 session.add_user_message(user_msg_for_llm)
             session.add_assistant_message(full_content, total_usage, debug=debug_info, model=provider.model)
+
+            if session.user_settings.get("context_optimization") == "sticky_notes":
+                facts_json = extract_facts_from_response(full_content)
+                if facts_json:
+                    session.update_facts(facts_json)
+
             session_manager.save_session(session_id)
 
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
@@ -545,6 +597,8 @@ def get_context_settings(session_id: str):
     sliding_window_type = session.user_settings.get("sliding_window_type", "messages")
     sliding_window_limit = session.user_settings.get("sliding_window_limit", 10)
 
+    sticky_notes_limit = session.user_settings.get("sticky_notes_limit", 6)
+
     return jsonify({
         "context_optimization": optimization,
         "summarization_enabled": summarization_enabled,
@@ -553,6 +607,7 @@ def get_context_settings(session_id: str):
         "summarize_context_percent": summarize_context_percent,
         "sliding_window_type": sliding_window_type,
         "sliding_window_limit": sliding_window_limit,
+        "sticky_notes_limit": sticky_notes_limit,
         "default_interval": config.default_messages_interval,
     })
 
@@ -570,7 +625,9 @@ def set_context_settings(session_id: str):
 
     if "context_optimization" in data:
         opt = data["context_optimization"]
-        if opt in ("none", "summarization", "sliding_window"):
+        if opt in ("none", "summarization", "sliding_window", "sticky_notes"):
+            if opt != "sticky_notes":
+                session.facts = {}
             session.user_settings["context_optimization"] = opt
 
     if "summarization_enabled" in data:
@@ -612,6 +669,14 @@ def set_context_settings(session_id: str):
         if limit > 1000:
             limit = 1000
         session.user_settings["sliding_window_limit"] = limit
+
+    if "sticky_notes_limit" in data:
+        limit = int(data["sticky_notes_limit"])
+        if limit < 1:
+            limit = 1
+        if limit > 50:
+            limit = 50
+        session.user_settings["sticky_notes_limit"] = limit
 
     session_manager.save_session(session_id)
 
