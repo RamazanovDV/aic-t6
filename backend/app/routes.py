@@ -209,6 +209,10 @@ def chat():
         facts_json, cleaned_content = extract_facts_from_response(response.content)
         if facts_json:
             session.update_facts(facts_json)
+            if debug_info is None:
+                debug_info = {}
+            debug_info["facts"] = facts_json
+            session.messages[-1].debug = debug_info
         if cleaned_content:
             message_for_user = cleaned_content
 
@@ -227,6 +231,8 @@ def chat():
     
     if debug_info:
         result["debug"] = debug_info
+    elif session.user_settings.get("context_optimization") == "sticky_notes" and session.facts:
+        result["debug"] = {"facts": session.facts}
     
     return jsonify(result)
 
@@ -393,13 +399,18 @@ def chat_stream():
                 facts_json, cleaned_content = extract_facts_from_response(full_content)
                 if facts_json:
                     session.update_facts(facts_json)
+                    if session.messages:
+                        session.messages[-1].debug = {"facts": facts_json}
                 if cleaned_content:
                     content_for_user = cleaned_content
 
             session_manager.save_session(session_id)
 
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
-            yield f"data: {json.dumps({'content': content_for_user, 'done': True, 'usage': total_usage, 'debug': {'request': debug_request, 'response': debug_response}, 'disabled_indices': disabled_indices})}\n\n"
+            debug_data = {'request': debug_request, 'response': debug_response}
+            if session.user_settings.get("context_optimization") == "sticky_notes" and session.facts:
+                debug_data['facts'] = session.facts
+            yield f"data: {json.dumps({'content': content_for_user, 'done': True, 'usage': total_usage, 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
 
         except ContextLengthExceededError as e:
             session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
