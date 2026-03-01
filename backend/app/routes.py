@@ -205,13 +205,16 @@ def chat():
 
     message_for_user = response.content
     
+    raw_facts = None
+    
     if session.user_settings.get("context_optimization") == "sticky_notes":
         facts_json, cleaned_content = extract_facts_from_response(response.content)
         if facts_json:
+            raw_facts = facts_json
             session.update_facts(facts_json)
             if debug_info is None:
                 debug_info = {}
-            debug_info["facts"] = facts_json
+            debug_info["raw_facts"] = facts_json
             session.messages[-1].debug = debug_info
         if cleaned_content:
             message_for_user = cleaned_content
@@ -231,10 +234,13 @@ def chat():
     
     if debug_info:
         result["debug"] = debug_info
-    if session.user_settings.get("context_optimization") == "sticky_notes" and session.facts:
+    if session.user_settings.get("context_optimization") == "sticky_notes":
         if "debug" not in result:
             result["debug"] = {}
-        result["debug"]["facts"] = session.facts
+        if raw_facts:
+            result["debug"]["raw_facts"] = raw_facts
+        if session.facts:
+            result["debug"]["facts"] = session.facts
     
     return jsonify(result)
 
@@ -396,13 +402,15 @@ def chat_stream():
             session.add_assistant_message(full_content, total_usage, debug=debug_info, model=provider.model)
 
             content_for_user = full_content
+            raw_facts = None
             
             if session.user_settings.get("context_optimization") == "sticky_notes":
                 facts_json, cleaned_content = extract_facts_from_response(full_content)
                 if facts_json:
+                    raw_facts = facts_json
                     session.update_facts(facts_json)
                     if session.messages:
-                        session.messages[-1].debug = {"facts": facts_json}
+                        session.messages[-1].debug = {"raw_facts": facts_json}
                 if cleaned_content:
                     content_for_user = cleaned_content
 
@@ -410,8 +418,11 @@ def chat_stream():
 
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
             debug_data = {'request': debug_request, 'response': debug_response}
-            if session.user_settings.get("context_optimization") == "sticky_notes" and session.facts:
-                debug_data['facts'] = session.facts
+            if session.user_settings.get("context_optimization") == "sticky_notes":
+                if raw_facts:
+                    debug_data['raw_facts'] = raw_facts
+                if session.facts:
+                    debug_data['facts'] = session.facts
             yield f"data: {json.dumps({'content': content_for_user, 'done': True, 'usage': total_usage, 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
 
         except ContextLengthExceededError as e:
