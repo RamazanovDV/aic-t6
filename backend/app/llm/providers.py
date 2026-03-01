@@ -313,7 +313,13 @@ class AnthropicProvider(BaseProvider):
             raise
 
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
+        content = ""
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                content = block.get("text", "")
+                break
+        if not content:
+            content = data.get("content", [{}])[0].get("text", "") or data.get("content", [{}])[0].get("thinking", "")
         
         usage = {}
         if "usage" in data:
@@ -336,6 +342,16 @@ class AnthropicProvider(BaseProvider):
 
     def list_models(self) -> list[str]:
         try:
+            url_lower = self.url.lower()
+            if "minimax.io/anthropic" in url_lower:
+                return [
+                    "MiniMax-M2.5",
+                    "MiniMax-M2.5-highspeed",
+                    "MiniMax-M2.1",
+                    "MiniMax-M2.1-highspeed",
+                    "MiniMax-M2",
+                ]
+            
             headers = {
                 "x-api-key": self.api_key,
                 "anthropic-version": "2023-06-01",

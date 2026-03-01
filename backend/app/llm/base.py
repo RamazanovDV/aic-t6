@@ -65,19 +65,28 @@ class ProviderFactory:
     def create(cls, name: str, config: dict[str, Any]) -> BaseProvider:
         from app.llm.providers import GenericOpenAIProvider
 
-        provider_type = config.get("type", name)
+        provider_type = config.get("type", name).lower()
         
         if provider_type not in cls._providers:
             url = config.get("url", "").lower()
-            if "anthropic" in url:
+            if "anthropic" in url or "minimax.io/anthropic" in url:
                 provider_type = "anthropic"
             elif "ollama" in url:
                 provider_type = "ollama"
+            elif "minimax" in url or "minimaxi" in url:
+                provider_type = "minimax"
             else:
                 provider_type = "openai"
         
         if provider_type in cls._providers:
             provider_class = cls._providers[provider_type]
+        elif provider_type in ("minimax", "minimaxi"):
+            url_lower = config.get("url", "").lower()
+            if "minimaxi" in url_lower and "/chatcompletion" in url_lower:
+                provider_class = GenericOpenAIProvider
+            else:
+                provider_type = "anthropic"
+                provider_class = cls._providers["anthropic"]
         elif config.get("url") and config.get("api_key") and config.get("model"):
             provider_class = GenericOpenAIProvider
         else:
@@ -89,6 +98,8 @@ class ProviderFactory:
             "openai": "https://api.openai.com/v1/chat/completions",
             "anthropic": "https://api.anthropic.com/v1/messages",
             "ollama": "http://localhost:11434",
+            "minimax": "https://api.minimaxi.com/v1/text/chatcompletion_v2",
+            "minimaxi": "https://api.minimaxi.com/v1/text/chatcompletion_v2",
         }
         
         if not url:
@@ -97,7 +108,19 @@ class ProviderFactory:
         if provider_type == "ollama":
             if "/api/chat" not in url:
                 url = url.rstrip("/") + "/api/chat"
-        elif "/chat/completions" not in url and "/messages" not in url:
+        elif provider_type == "anthropic":
+            url_lower = url.lower()
+            if "/anthropic" in url_lower and "/v1/messages" not in url_lower:
+                if url_lower.endswith("/anthropic"):
+                    url = url + "/v1/messages"
+                elif "/anthropic/" in url_lower:
+                    url = url.rstrip("/") + "/v1/messages"
+            elif "/messages" not in url:
+                url = url.rstrip("/") + "/messages"
+        elif provider_type in ("minimax", "minimaxi"):
+            if "/chatcompletion" not in url:
+                url = url.rstrip("/") + "/text/chatcompletion_v2"
+        elif "/chat/completions" not in url:
             url = url.rstrip("/") + "/chat/completions"
 
         return provider_class(

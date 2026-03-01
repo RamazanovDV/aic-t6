@@ -143,6 +143,7 @@
             <select id="provider-type" class="form-input">
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
+                <option value="minimax">MiniMax</option>
                 <option value="ollama">Ollama</option>
                 <option value="generic">Generic (OpenAI-compatible)</option>
             </select>
@@ -196,6 +197,7 @@
                 <option value="*">* (любой)</option>
                 <option value="openai">openai</option>
                 <option value="anthropic">anthropic</option>
+                <option value="minimax">minimax</option>
                 <option value="ollama">ollama</option>
             </select>
         </div>
@@ -594,8 +596,9 @@
         const placeholders = {
             'openai': 'https://api.openai.com/v1',
             'anthropic': 'https://api.anthropic.com',
+            'minimax': 'https://api.minimaxi.com/v1',
             'ollama': 'http://localhost:11434',
-            'generic': 'https://api.minimax.chat/v1'
+            'generic': 'https://api.openai.com/v1'
         };
         document.getElementById('provider-url').placeholder = placeholders[type] || placeholders['openai'];
     }
