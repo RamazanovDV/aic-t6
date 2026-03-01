@@ -1275,11 +1275,8 @@
             document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
         } else if (hasFacts) {
-            // Show facts for sticky_notes
-            const factsInfo = {};
-            if (debugData.raw_facts) factsInfo.raw_facts = debugData.raw_facts;
-            if (debugData.facts) factsInfo.facts = debugData.facts;
-            document.getElementById('debug-json').textContent = JSON.stringify(factsInfo, null, 2);
+            // Show all debug info including facts for sticky_notes
+            document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
         } else {
             // Standard debug for LLM calls
