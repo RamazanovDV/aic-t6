@@ -726,7 +726,7 @@
         
         // 3. Debug (bottom-left)
         if ((role === 'assistant' || role === 'error' || role === 'summary') && debugData) {
-            const debugJson = JSON.stringify(debugData).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/'/g, "\\'");
+            const debugJson = encodeURIComponent(JSON.stringify(debugData));
             actionsHtml += `<button class="message-debug-btn" data-debug="${debugJson}" title="Debug">🔍</button>`;
         }
         
@@ -1620,7 +1620,7 @@
             const debugJson = btn.dataset.debug;
             if (debugJson) {
                 try {
-                    const debugData = JSON.parse(debugJson);
+                    const debugData = JSON.parse(decodeURIComponent(debugJson));
                     showDebugModal(debugData);
                 } catch (err) {
                     console.error('Failed to parse debug data:', err);
